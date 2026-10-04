@@ -1,6 +1,8 @@
 # 安装、启动和升级
 
-项目提供标准 Python 包、wheel 和源码包，Python 最低版本为 3.10；CI 验证 Windows／Linux 上的 3.10 和 3.12。命令为 `mcp-harries-resourcer`，Python 包名为 `mcp_harries_resourcer`。本批提供 Git 来源安装，没有执行 PyPI 发布。
+项目提供标准 Python 包、wheel 和源码包，Python 最低版本为 3.10；CI 配置 Windows／Linux 上的 3.10、3.12 和 3.14 六组检查。命令为 `mcp-harries-resourcer`，Python 包名为 `mcp_harries_resourcer`。目前提供 Git 来源安装，没有执行 PyPI 发布。
+
+新环境建议选择 Python 3.14。Python 3.10 的兼容性检查继续保留，但其上游维护已于 2026 年 10 月结束，兼容性不代表仍有上游安全更新；版本维护状态见 [Python 官方下载页](https://www.python.org/downloads/)。这里测试普通 CPython，尚未验证自由线程构建或 PyPy。
 
 ## 使用 uvx 启动
 
@@ -66,7 +68,7 @@ MCP 配置使用该虚拟环境 Python 的绝对路径，`args` 为 `["-m", "mcp
 
 原先克隆仓库、安装 `requirements.txt`、执行根目录 `server.py` 的配置继续可用，不需要迁移已有笔记。开发安装可用 `python -m pip install -e .`；随后 `python -m mcp_harries_resourcer` 或命令入口均可启动。
 
-生产模块移入 `mcp_harries_resourcer/`。直接用 Python 导入内部模块的脚本需要改成例如 `from mcp_harries_resourcer import server`；这些内部模块不承诺稳定的库 API。MCP 的 8 个工具名称和参数保持不变。
+生产模块移入 `mcp_harries_resourcer/`。直接用 Python 导入内部模块的脚本需要改成例如 `from mcp_harries_resourcer import server`；这些内部模块不承诺稳定的库 API。MCP 的 8 个工具名称和已有参数保持兼容；后续版本增加的可选参数见 README 与版本记录。
 
 ## 验证安装产物
 
@@ -83,8 +85,10 @@ Windows 可通过 `TEMP`、`TMP` 指定临时盘，`PIP_CACHE_DIR`、`UV_CACHE_D
 
 包配置遵循 [Python 打包指南](https://packaging.python.org/en/latest/guides/writing-pyproject-toml/)，依赖声明从 `requirements.txt` 读取，源码与安装包共用一份范围。命令入口形式参考 [DuckDuckGo MCP Server](https://github.com/nickclyde/duckduckgo-mcp-server/blob/main/pyproject.toml) 的工具分发方式；本项目独立实现安装与验证流程。
 
-本批本地验证：Windows / Python 3.12.12，原有 193 项测试中 192 项通过、1 项因符号链接权限不足跳过。源码包 → wheel → 全新虚拟环境、命令入口、模块入口、uv 临时来源启动和旧版脚本入口均已完成上述真实 MCP 流程。缓存与验证环境位于 F 盘。四组跨平台结果以 [Actions](https://github.com/fisHarly0/mcp-harries-resourcer/actions/workflows/tests.yml) 中对应提交为准。
+0.1.0 首次打包时的本地验证：Windows / Python 3.12.12，当时 193 项测试中 192 项通过、1 项因符号链接权限不足跳过。源码包 → wheel → 全新虚拟环境、命令入口、模块入口、uv 临时来源启动和旧版脚本入口均完成上述真实 MCP 流程。缓存与验证环境位于 F 盘。当前六组跨平台结果以 [Actions](https://github.com/fisHarly0/mcp-harries-resourcer/actions/workflows/tests.yml) 中对应提交为准。
 
 首轮安装 CI 发现 Python 3.10 新虚拟环境未装入 `lxml_html_clean`：旧 pip 对上游 `html_clean`／`html-clean` extra 的处理导致漏装，`pip check` 仍报告正常，真实 MCP 初始化才暴露错误。0.1.1 将该模块显式加入依赖；CI 各组合独立完成，避免一组失败取消其他组的安装验证。
 
 修正后，本地另用 Python 3.10.20 新建虚拟环境（自带 pip 23.0.1），完成 0.1.1 的源码包构建、wheel 安装、命令与模块入口的真实 MCP 流程。独立安装清理模块也是 [上游提供的安装方式](https://lxml-html-clean.readthedocs.io/en/latest/#installation)。
+
+2026-10-04，0.3.0 代码另在 Windows／Python 3.14.8 上完成 290 项测试（289 通过、1 项符号链接权限跳过），并通过源码包 → wheel → 全新虚拟环境的安装验证。命令入口和模块入口均实际验证 8 个工具、解析子进程、页面声明编码、Markdown 代码与表格、笔记保存及文件优先排序。本次只更新兼容性检查与文档，没有改变包版本或运行时行为。

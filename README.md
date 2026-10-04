@@ -194,7 +194,7 @@ claude mcp add --scope user resourcer -e RESOURCER_RESEARCH_ROOT=D:\research -- 
 
 macOS / Linux 先用 `.venv/bin/python -m pip install -r requirements-dev.txt` 安装开发依赖，再执行 `.venv/bin/python -m unittest discover -s tests -v`。其中独立 Markdown 渲染器只用于验证输出结构，不属于服务运行依赖。
 
-测试使用固定 HTML 样本、模拟 HTTP 响应和可控时钟，覆盖 URL 解码、去重、无结果、验证码、限流、超时、引擎切换、正文失败、共享限速、缓存过期与淘汰、请求取消、保存和本地检索；MCP 测试还会启动真实 stdio 子进程。测试不会向真实搜索引擎发请求，固定样本不保证引擎未来页面保持不变。GitHub Actions 配置了 Windows / Linux 与 Python 3.10 / 3.12 的检查。
+测试使用固定 HTML 样本、模拟 HTTP 响应和可控时钟，覆盖 URL 解码、去重、无结果、验证码、限流、超时、引擎切换、正文失败、共享限速、缓存过期与淘汰、请求取消、保存和本地检索；MCP 测试还会启动真实 stdio 子进程。测试不会向真实搜索引擎发请求，固定样本不保证引擎未来页面保持不变。GitHub Actions 配置了 Windows / Linux 与 Python 3.10 / 3.12 / 3.14 的六组检查，每组均包含测试和独立安装验证；实际结果以对应提交的 Actions 为准。
 
 分页、刷新、版本变化和 JSON 参数还会通过本地 HTTP 页面与真实 MCP 子进程验证。当前持续优化方向与各批次验收条件见 [优化路线](docs/roadmap.md)。
 
