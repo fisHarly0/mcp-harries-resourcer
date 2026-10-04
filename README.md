@@ -10,43 +10,26 @@ Resourcer 是一个轻量 MCP 资料工具，把网页搜索、正文提取和�
 
 不需要搜索 API Key。服务通过 stdio 运行；网页搜索和抓取仍会向搜索引擎及目标网站发送网络请求。支持 Claude Code，以及能启动 stdio MCP 服务的其他客户端。
 
-[快速开始](#快速开始) · [使用演示](docs/usage-example.md) · [搜索与来源筛选](docs/search.md) · [分页与 JSON](docs/reading.md) · [整批预算](docs/batches.md) · [网络恢复与限制](docs/network.md) · [工具列表](#工具) · [配置](#限速与正文缓存) · [优化路线](docs/roadmap.md)
+[快速开始](#快速开始) · [常用调用](#常用调用) · [工具列表](#工具) · [本地检索](docs/local-search.md) · [SearXNG](docs/searxng.md) · [配置](#限速与正文缓存) · [版本记录](CHANGELOG.md)
+
+当前版本 **0.4.0**：新增本地多关键词查询 `all`／`any`，可以跨同一文件的标题与正文找回资料，并查看各词的命中位置。默认保持整段文字匹配，已有调用无需修改。
 
 ## 适合做什么
 
-- **查资料**：围绕一个问题搜索多个关键词，中文查询优先 Bing，其他查询优先 DuckDuckGo；支持六个中文站点的快捷定向搜索。
-- **读来源**：批量提取网页正文，保留链接和失败诊断，让调用方根据原文整理，而不是只读搜索摘要。
-- **积累笔记**：保存为本地 Markdown，按关键词、集合、标签和来源域名找回；也可只按标签列出笔记。
+| 需求 | 已有能力 | 详细说明 |
+|---|---|---|
+| 搜索网页资料 | Bing／DuckDuckGo 自动切换或合并，多查询去重、中文站点搜索、包含／排除域名、来源排名 | [搜索与筛选](docs/search.md) |
+| 阅读技术文档 | 纯文本或 Markdown，代码、嵌套列表、表格、链接与引用索引；处理页面声明的中文编码 | [正文结构](docs/content.md) · [编码](docs/encoding.md) |
+| 续读长文、批量调研 | 分页与版本校验、单次刷新、批量抓取、正文总量限制、JSON 输出 | [分页与 JSON](docs/reading.md) |
+| 保存和找回笔记 | Markdown 收藏、元数据筛选、逐行或逐文件结果、字段优先排序、全部／任一关键词及逐词上下文 | [本地检索](docs/local-search.md) |
+| 处理慢请求和部分失败 | 限速、有限重试、缓存与连接复用；整批到期保留已完成结果，支持取消和进度通知 | [网络限制](docs/network.md) · [整批预算](docs/batches.md) · [进度](docs/progress.md) |
+| 接入自己的搜索服务 | 可选 SearXNG JSON 后端，保留上游引擎与部分失败诊断 | [SearXNG 接入](docs/searxng.md) |
 
-内置跨调用限速、最多 5 路正文抓取和有容量上限的短时缓存。重复读取可以复用完整正文，保存同名资料不会覆盖旧文件。
+内置搜索不需要额外配置：中文查询优先 Bing，其他查询优先 DuckDuckGo。SearXNG 需要自行提供实例地址并启用 JSON 接口；当前已验证接入协议与工具流程，尚未验证真实实例的检索效果。
 
-网络请求支持有限重试、`Retry-After` 等待、总时间预算和响应大小限制。大页面、解压后超限的响应或持续缓慢的下载会明确报错，不会把部分正文当作完整资料保存到缓存。
+默认最多并发抓取 5 个网页，多查询／批量阅读／调研的整批预算为 120 秒。本地搜索默认单文件上限 2 MiB、扫描预算 10 秒，提前排除依赖与构建目录。预算耗尽或出现读取错误会明确标记不完整，空结果不能一概理解为资料不存在。
 
-多查询搜索、批量阅读和调研默认还有 **120 秒整批预算**。到时保留已完成的结果，标记未完成项，并取消本批剩余工作；双引擎搜索已拿到的来源也会保留。可通过 `time_budget_seconds` 调整，详见 [整批预算与部分结果](docs/batches.md)。
-
-长文支持分页续读和正文版本校验；需要新内容时可单次刷新。单页、批量和调研工具支持 JSON 输出，调研资料包可限制正文总长度，按需读取剩余页面。
-
-阅读技术文档时可用 `content_format="markdown"`，保留提取到的标题、代码块、表格和链接。JSON 还提供正文引用索引、结构统计和简易异常提示；两种正文格式共享同一次下载，使用各自的版本标识。示例与限制见 [Markdown 与引用](docs/content.md)。
-
-Markdown 保留所选正文的嵌套列表层级、有序列表起始编号和列表内代码缩进；表格里的 `a | b` 等行内代码也保持在一个单元格内。表格标题与数据分开，无表头表格保留首行数据，合并单元格以空位对齐；列表中的表格也会恢复到所属条目。超大跨度和更复杂布局仍需按原文核对。
-
-正文与 Bing／DuckDuckGo 搜索 HTML 在独立 Python 进程中解析，共用默认 2 个进程名额，每次解析预算 20 秒（含排队与启动）。超时或取消会终止并回收对应解析进程，大搜索页和复杂正文不会持续占住主事件循环；搜索解析失败可按原有策略切换引擎。进程启动和内存开销、时间边界见 [解析隔离](docs/parsing.md)。
-
-网页原始字节在解析进程中解码，优先读取 BOM、HTTP 编码声明和前 1,024 字节内的 HTML 编码声明；支持仅在页面内声明 GBK／GB2312 等编码的旧网页。JSON 正文结果带 `encoding_info`，损坏字节另有提示。规则和限制见 [网页编码](docs/encoding.md)。
-
-支持进度的 MCP 客户端可以接收搜索与读取通知：批量调用按已结束的查询／不同 URL 计数，调研先报告搜索阶段，再报告网页读取进度。成功与失败分别说明，整批到期不会把剩余项补成完成。启用方式与计数规则见 [进度反馈](docs/progress.md)。
-
-同一服务进程会复用空闲 HTTP 客户端，减少重复初始化，并在条件允许时复用连接。客户端在一次搜索／读取作用域内独占，归还时清空 Cookie；最多保留 5 个空闲客户端，60 秒未再次借出即关闭。短页测量和资源边界见 [HTTP 客户端复用](docs/clients.md)。
-
-搜索支持包含／排除域名，并逐条校验返回链接。需要扩大来源覆盖时，可选择 `strategy="merge"` 同时查询两个引擎；去重后保留各引擎的原始链接和排名。搜索工具也支持 JSON 输出。
-
-已有 SearXNG 实例时，设置 `RESOURCER_SEARXNG_URL` 并在搜索调用中指定 `backend="searxng"`，可使用实例提供的聚合搜索。保留来源引擎与部分失败诊断；没有配置时继续使用默认内置搜索。配置方法和已验证范围见 [SearXNG 接入](docs/searxng.md)。
-
-本地搜索支持笔记元数据筛选、JSON 和扫描统计，在进入前排除依赖／构建目录。默认单文件上限 2 MiB、扫描预算 10 秒；达到限制或遇到无法读取的文件时明确报告不完整。参数、格式兼容和实测见 [本地资料检索](docs/local-search.md)。
-
-本地找资料时可指定 `search_local(..., result_mode="files")`，每份文件只返回一条，标题、标签、文件名命中优先于普通全文命中。默认 `lines` 仍按行返回；两种模式的长行摘要都会展示关键词附近的上下文。扫描预算、排序和结果截断见 [本地检索说明](docs/local-search.md)。
-
-记得多个关键词但不记得原句时，可用 `search_local(query="asyncio 取消", root="资料目录", result_mode="files", query_mode="all")`。两个词可以分散在同一文件中，结果附各词的命中位置；`any` 匹配任一词。默认 `literal` 保留连续子串匹配，空格和代码标点仍按原样搜索。多词模式按空白拆分，最多 16 个不同词、4096 字符，不自动做中文分词或解释查询操作符。
+正文与内置搜索 HTML 在可终止子进程中解析；同一服务进程复用短时正文缓存和空闲 HTTP 客户端。资源开销与限制见 [解析隔离](docs/parsing.md) 和 [客户端复用](docs/clients.md)。
 
 ```mermaid
 flowchart LR
@@ -66,6 +49,31 @@ uvx --from git+https://github.com/fisHarly0/mcp-harries-resourcer.git@main mcp-h
 ```
 
 初次使用先在末尾加 `--version` 完成下载与安装，再配置客户端。MCP 的 `command` 为 `uvx`，`args` 为 `["--from", "git+https://github.com/fisHarly0/mcp-harries-resourcer.git@main", "mcp-harries-resourcer"]`。固定提交、更新、缓存路径和完整配置见 [安装说明](docs/installation.md)，版本记录见 [CHANGELOG](CHANGELOG.md)。当前提供 Git 安装；没有执行 PyPI 发布。
+
+通用 MCP 客户端配置：
+
+```json
+{
+  "mcpServers": {
+    "resourcer": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/fisHarly0/mcp-harries-resourcer.git@main",
+        "mcp-harries-resourcer"
+      ]
+    }
+  }
+}
+```
+
+使用 Git 来源安装后，更新并检查版本：
+
+```text
+uvx --refresh --from git+https://github.com/fisHarly0/mcp-harries-resourcer.git@main mcp-harries-resourcer --version
+```
+
+完成后重新连接 MCP。需要固定代码时，将 `main` 替换为完整提交 SHA。
 
 需要修改源码或沿用原配置时，可按下面步骤克隆和启动；不需要激活虚拟环境。
 
@@ -113,6 +121,63 @@ claude mcp list
 
 完整参数示例、预期输出和保存文件示例见 [使用演示](docs/usage-example.md)。
 
+## 常用调用
+
+下面是交给 MCP 客户端的工具名与参数示例。
+
+### 在指定来源内搜索
+
+```python
+web_search(
+    query="Python asyncio cancellation",
+    include_domains=["docs.python.org"],
+    strategy="merge",
+    response_format="json",
+)
+```
+
+域名条件会逐条检查结果链接；合并模式保留两个引擎的来源信息，但不保证相关性更高。
+
+### 按 Markdown 阅读网页
+
+```python
+fetch_page(
+    url="https://docs.python.org/3/library/asyncio-task.html",
+    content_format="markdown",
+    max_chars=8000,
+    response_format="json",
+)
+```
+
+查看返回的完整性、`next_index` 和正文版本信息，再按需续读。代码、列表、表格来自提取后的正文，复杂页面仍需对照原网页。
+
+### 用几个关键词找回笔记
+
+```python
+search_local(
+    query="asyncio 取消",
+    root="F:/research",
+    result_mode="files",
+    query_mode="all",
+    max_results=5,
+    response_format="json",
+)
+```
+
+把 `root` 换成实际保存目录。例如“asyncio”在标题、“取消”在正文，也能匹配同一份笔记；每个词附命中上下文和位置。
+
+| 参数 | 选择方式 |
+|---|---|
+| `query_mode="literal"`（默认） | 匹配整段连续文字，保留空格与代码标点 |
+| `query_mode="all"` | 命中全部词，词序不限 |
+| `query_mode="any"` | 命中任一词 |
+| `result_mode="files"` | 每文件一条；允许跨字段、跨行匹配，并按字段层级排序 |
+| `result_mode="lines"`（默认） | 按命中行返回；`all` 要求全部词出现在同一行 |
+
+多词模式按空白拆分，最多 16 个不同词、4096 字符；不自动分词，也不把引号、减号或通配符解释为查询语法。`all` 的文件排序要求所有词共同满足对应层级，单个标题词不会把整个查询提升为标题匹配。结果的 `scan_complete` 与 `results_truncated` 分别表示扫描是否完整、展示是否截断。
+
+只按笔记信息浏览时，可将 `query` 留空并设置集合、标签或来源筛选，例如 `search_local(query="", root="F:/research", tags="python,asyncio", response_format="json")`。
+
 ## 工具
 
 | 工具 | 用途 |
@@ -134,7 +199,7 @@ Windows 示例：把下面的目录改成你的资料目录，再重新添加或
 
 ```powershell
 $repoPath = (Get-Location).Path
-claude mcp add --scope user resourcer -e RESOURCER_RESEARCH_ROOT=D:\research -- "$repoPath\.venv\Scripts\python.exe" "$repoPath\server.py"
+claude mcp add --scope user resourcer -e RESOURCER_RESEARCH_ROOT=F:\research -- "$repoPath\.venv\Scripts\python.exe" "$repoPath\server.py"
 ```
 
 环境变量需要传给 MCP **子进程**。在另一个终端临时设置环境变量，不会改变已经运行的客户端或服务。
@@ -199,6 +264,8 @@ macOS / Linux 先用 `.venv/bin/python -m pip install -r requirements-dev.txt` �
 测试使用固定 HTML 样本、模拟 HTTP 响应和可控时钟，覆盖 URL 解码、去重、无结果、验证码、限流、超时、引擎切换、正文失败、共享限速、缓存过期与淘汰、请求取消、保存和本地检索；MCP 测试还会启动真实 stdio 子进程。测试不会向真实搜索引擎发请求，固定样本不保证引擎未来页面保持不变。GitHub Actions 配置了 Windows / Linux 与 Python 3.10 / 3.12 / 3.14 的六组检查，每组均包含测试和独立安装验证；实际结果以对应提交的 Actions 为准。
 
 分页、刷新、版本变化和 JSON 参数还会通过本地 HTTP 页面与真实 MCP 子进程验证。当前持续优化方向与各批次验收条件见 [优化路线](docs/roadmap.md)。
+
+0.4.0 功能提交 [`851423d`](https://github.com/fisHarly0/mcp-harries-resourcer/commit/851423db611dc0272d684afc5a747d13a0619913) 的验证：本地 Windows／Python 3.12.12 共 308 项测试，307 项通过、1 项因符号链接权限跳过；[远端六组 CI](https://github.com/fisHarly0/mcp-harries-resourcer/actions/runs/37203732419) 全部通过。每组还独立构建源码包与 wheel，在全新虚拟环境中通过命令入口和模块入口验证真实 MCP，包括多关键词检索。这些结果不等于真实搜索引擎的可用性或相关性保证。
 
 可选的真实搜索检查：`python scripts/search_smoke.py --output <结果文件.json>`。默认比较 6 个中英文案例的两种策略，分别检查域名和已知专题页命中，保留原始结果、耗时和失败原因。空结果的域名检查为 `null`，官方首页也不会算成专题页命中；支持选案例、重复运行和中断后保留记录。参数和实测见 [搜索质量验证](docs/search-quality.md)。
 
