@@ -5,8 +5,8 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 import httpx
-from progress import Progress, report, with_progress
-import server
+from mcp_harries_resourcer.progress import Progress, report, with_progress
+from mcp_harries_resourcer import server
 
 
 class Context:

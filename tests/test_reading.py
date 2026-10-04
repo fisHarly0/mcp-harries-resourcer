@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-import server
-from request_policy import RequestPolicy
-from http_policy import HTTPPolicy
+from mcp_harries_resourcer import server
+from mcp_harries_resourcer.request_policy import RequestPolicy
+from mcp_harries_resourcer.http_policy import HTTPPolicy
 
 
 REAL_CLIENT = httpx.AsyncClient

@@ -6,8 +6,8 @@ from pathlib import Path
 import subprocess
 import sys
 
-from request_policy import _setting
-from task_cleanup import wait_for_owned
+from .request_policy import _setting
+from .task_cleanup import wait_for_owned
 
 
 class ParseFailure(Exception):

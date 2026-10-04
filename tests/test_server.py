@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-import server
-from http_policy import HTTPPolicy
+from mcp_harries_resourcer import server
+from mcp_harries_resourcer.http_policy import HTTPPolicy
 
 
 FIXTURES = Path(__file__).parent / "fixtures"

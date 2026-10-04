@@ -5,7 +5,7 @@ import unittest
 
 import httpx
 
-from client_pool import ClientPool
+from mcp_harries_resourcer.client_pool import ClientPool
 
 
 class ClientPoolTests(unittest.IsolatedAsyncioTestCase):

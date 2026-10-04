@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from batch_budget import BatchBudget, Unfinished
-from request_policy import RequestPolicy
-import server
+from mcp_harries_resourcer.batch_budget import BatchBudget, Unfinished
+from mcp_harries_resourcer.request_policy import RequestPolicy
+from mcp_harries_resourcer import server
 
 
 REAL_CLIENT = httpx.AsyncClient
@@ -72,7 +72,7 @@ class BatchBudgetTests(unittest.IsolatedAsyncioTestCase):
         async def early_timeout(tasks, **kwargs):
             await asyncio.sleep(0)
             return set(), set(tasks)
-        with patch("batch_budget.asyncio.wait", side_effect=early_timeout):
+        with patch("mcp_harries_resourcer.batch_budget.asyncio.wait", side_effect=early_timeout):
             first = await budget.collect([0], lambda _: asyncio.Event().wait())
         self.assertEqual(first, [Unfinished(True)])
         self.assertTrue(budget.metadata()["deadline_exceeded"])

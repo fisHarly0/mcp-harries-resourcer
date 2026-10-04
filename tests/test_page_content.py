@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from page_content import content_warnings, extract_markdown, safe_link
-import page_content
-from request_policy import PageCache, RequestPolicy
-import server
+from mcp_harries_resourcer.page_content import content_warnings, extract_markdown, safe_link
+from mcp_harries_resourcer import page_content
+from mcp_harries_resourcer.request_policy import PageCache, RequestPolicy
+from mcp_harries_resourcer import server
 
 
 HTML = (Path(__file__).parent / "fixtures" / "technical_article.html").read_text(encoding="utf-8")

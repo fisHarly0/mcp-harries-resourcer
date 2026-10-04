@@ -9,8 +9,8 @@ import time
 import unittest
 from unittest.mock import patch
 
-import local_search
-import server
+from mcp_harries_resourcer import local_search
+from mcp_harries_resourcer import server
 
 
 class LocalSearchTests(unittest.TestCase):

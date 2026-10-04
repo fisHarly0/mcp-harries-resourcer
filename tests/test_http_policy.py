@@ -8,9 +8,9 @@ import zlib
 
 import httpx
 
-from http_policy import HTTPPolicy, HTTPPolicyError, retry_after
-from request_policy import RequestPolicy
-import server
+from mcp_harries_resourcer.http_policy import HTTPPolicy, HTTPPolicyError, retry_after
+from mcp_harries_resourcer.request_policy import RequestPolicy
+from mcp_harries_resourcer import server
 
 
 class Clock:
@@ -55,7 +55,7 @@ class RetryHeaderTests(unittest.TestCase):
     def test_configuration_cannot_disable_size_or_deadline(self):
         with patch.dict(os.environ, {"RESOURCER_RESPONSE_MAX_BYTES": "0", "RESOURCER_REQUEST_TIMEOUT_SECONDS": "0",
                                      "RESOURCER_HTTP_RETRIES": "0"}):
-            with self.assertLogs("request_policy", level="WARNING"):
+            with self.assertLogs("mcp_harries_resourcer.request_policy", level="WARNING"):
                 policy = RequestPolicy.from_env()
         self.assertEqual(policy.http.max_bytes, 8 * 1024 * 1024)
         self.assertEqual(policy.http.total_timeout, 60)

@@ -9,7 +9,7 @@ import json
 import os
 import time
 
-from http_policy import HTTPPolicy
+from .http_policy import HTTPPolicy
 
 
 def _setting(name: str, default: int, maximum: int, minimum: int = 0) -> int:

@@ -6,7 +6,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import httpx
-import server
+from mcp_harries_resourcer import server
 
 RealClient = httpx.AsyncClient
 server.httpx.AsyncClient = lambda **kw: RealClient(

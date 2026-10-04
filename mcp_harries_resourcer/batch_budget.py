@@ -2,7 +2,7 @@
 import asyncio
 from dataclasses import dataclass
 import math
-from task_cleanup import cancel_and_wait
+from .task_cleanup import cancel_and_wait
 
 
 @dataclass(frozen=True)

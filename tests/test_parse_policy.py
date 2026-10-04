@@ -9,9 +9,9 @@ from unittest.mock import patch
 
 import httpx
 
-from parse_policy import ParseFailure, ParsePolicy
-from request_policy import RequestPolicy
-import server
+from mcp_harries_resourcer.parse_policy import ParseFailure, ParsePolicy
+from mcp_harries_resourcer.request_policy import RequestPolicy
+from mcp_harries_resourcer import server
 
 
 class ParserTests(unittest.IsolatedAsyncioTestCase):
@@ -118,7 +118,7 @@ class ParserTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(server, "PARSER", policy), patch.object(server, "NETWORK", RequestPolicy(fetch_rpm=0)):
                 async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, text="body"))) as client:
                     return await server._fetch_one(client, "https://example.org", 10)
-        with patch("parse_policy.asyncio.create_subprocess_exec", side_effect=delayed_spawn):
+        with patch("mcp_harries_resourcer.parse_policy.asyncio.create_subprocess_exec", side_effect=delayed_spawn):
             task = asyncio.create_task(fetch() if through_fetch else policy.parse("body", "url"))
             await asyncio.wait_for(created.wait(), 10)
             task.cancel()
@@ -141,7 +141,7 @@ class ParserTests(unittest.IsolatedAsyncioTestCase):
             except asyncio.CancelledError:
                 task.cancel()
                 raise  # Simulate 3.10 wait_for escaping before child cleanup.
-        with patch("parse_policy.asyncio.wait_for", side_effect=early_cancel):
+        with patch("mcp_harries_resourcer.parse_policy.asyncio.wait_for", side_effect=early_cancel):
             await self._check_spawn_cancel()
             await self._check_spawn_cancel(through_fetch=True)
 

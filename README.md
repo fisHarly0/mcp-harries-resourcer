@@ -49,7 +49,15 @@ flowchart LR
 
 ## 快速开始
 
-需要 Python 3.10+、Git，以及一个支持 stdio MCP 的客户端。以下命令在准备放置项目的目录运行；不需要激活虚拟环境。
+需要 Python 3.10+、Git，以及一个支持 stdio MCP 的客户端。已经安装 [uv](https://docs.astral.sh/uv/getting-started/installation/) 时，可以直接从 Git 来源启动：
+
+```text
+uvx --from git+https://github.com/fisHarly0/mcp-harries-resourcer.git@main mcp-harries-resourcer
+```
+
+初次使用先在末尾加 `--version` 完成下载与安装，再配置客户端。MCP 的 `command` 为 `uvx`，`args` 为 `["--from", "git+https://github.com/fisHarly0/mcp-harries-resourcer.git@main", "mcp-harries-resourcer"]`。固定提交、更新、缓存路径和完整配置见 [安装说明](docs/installation.md)，版本记录见 [CHANGELOG](CHANGELOG.md)。当前提供 Git 安装；没有执行 PyPI 发布。
+
+需要修改源码或沿用原配置时，可按下面步骤克隆和启动；不需要激活虚拟环境。
 
 ### Windows PowerShell
 
@@ -187,23 +195,28 @@ macOS / Linux 使用 `.venv/bin/python -m unittest discover -s tests -v`。
 
 ```text
 mcp-harries-resourcer/
-├── server.py              # 8 个 MCP 工具、搜索解析与资料保存
-├── request_policy.py      # 请求限速、缓存和重复下载复用
-├── client_pool.py         # 独占 HTTP 客户端复用、Cookie 清理和空闲回收
-├── http_policy.py         # 有界下载、重试、跳转和站点等待期
-├── batch_budget.py        # 整批截止时间、有限工作任务和部分结果
-├── task_cleanup.py        # 超时与重复取消后的子任务回收
-├── progress.py            # 请求内进度、通知合并与发送限时
-├── search_results.py      # 域名筛选、URL 去重与来源合并
-├── local_search.py        # 本地文本检索、笔记筛选、目录剪枝和扫描限制
-├── page_content.py        # Markdown、代码保留、引用索引和内容提示
-├── parse_policy.py        # 解析并发、超时、取消与子进程回收
-├── parse_worker.py        # 单页正文提取的独立进程入口
-├── requirements.txt       # Python 依赖
-├── docs/                  # 使用示例、项目对比与验证记录
-├── tests/                 # 回归测试与固定 HTML 样本
-├── scripts/               # 可选的真实搜索验证
-└── .github/workflows/     # Windows / Linux 自动检查
+├── pyproject.toml           # 包元数据、构建后端与命令入口
+├── server.py                # 旧版绝对路径启动兼容入口
+├── mcp_harries_resourcer/   # 安装后的 Python 包
+│   ├── __main__.py          # CLI、--help、--version 与 stdio 启动
+│   ├── server.py            # 8 个 MCP 工具、搜索解析与资料保存
+│   ├── request_policy.py    # 请求限速、缓存和重复下载复用
+│   ├── client_pool.py       # HTTP 客户端复用与 Cookie 清理
+│   ├── http_policy.py       # 有界下载、重试和站点等待期
+│   ├── batch_budget.py      # 整批时限、部分结果
+│   ├── task_cleanup.py      # 超时与重复取消后的清理
+│   ├── progress.py          # 请求内进度和通知合并
+│   ├── search_results.py    # 域名筛选、URL 去重与来源合并
+│   ├── local_search.py      # 本地检索、筛选和扫描限制
+│   ├── page_content.py      # Markdown、代码保留与引用
+│   ├── parse_policy.py      # 正文解析进程管理
+│   └── parse_worker.py      # 单页解析进程入口
+├── requirements.txt        # 源码与安装包共用的依赖范围
+├── CHANGELOG.md            # 版本记录
+├── docs/                   # 使用说明、项目对比与验证记录
+├── tests/                  # 回归测试与固定 HTML 样本
+├── scripts/                # 安装验证、真实搜索检查与性能样本
+└── .github/workflows/      # Windows / Linux 回归及隔离安装验证
 ```
 
 ## 反馈与贡献

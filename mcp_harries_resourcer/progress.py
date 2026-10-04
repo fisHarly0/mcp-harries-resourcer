@@ -4,7 +4,7 @@ from contextvars import ContextVar
 from functools import wraps
 from inspect import signature
 
-from task_cleanup import cancel_and_wait, wait_for_owned
+from .task_cleanup import cancel_and_wait, wait_for_owned
 
 
 _current = ContextVar("resourcer_progress", default=None)

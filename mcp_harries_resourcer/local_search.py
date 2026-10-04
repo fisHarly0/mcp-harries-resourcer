@@ -8,7 +8,7 @@ import stat
 import threading
 import time
 
-from search_results import domain_matches, normalize_domains, url_identity
+from .search_results import domain_matches, normalize_domains, url_identity
 
 DEFAULT_EXCLUDES = ".git,node_modules,__pycache__,.venv,venv,.next,dist,build,.godot"
 DEFAULT_EXTENSIONS = "txt,md,py,js,ts,json,html,htm,csv,yaml,yml,toml,gd,godot"

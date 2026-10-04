@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from request_policy import PageCache, RequestPacer, RequestPolicy
-import server
+from mcp_harries_resourcer.request_policy import PageCache, RequestPacer, RequestPolicy
+from mcp_harries_resourcer import server
 
 
 REAL_CLIENT = httpx.AsyncClient
@@ -137,7 +137,7 @@ class PacingTests(unittest.IsolatedAsyncioTestCase):
             "RESOURCER_SEARCH_RPM": "NaN", "RESOURCER_FETCH_RPM": "-1",
             "RESOURCER_CACHE_TTL_SECONDS": "Infinity", "RESOURCER_CACHE_MAX_ENTRIES": "999999",
             "RESOURCER_CACHE_MAX_BYTES": "-5",
-        }), self.assertLogs("request_policy", level="WARNING"):
+        }), self.assertLogs("mcp_harries_resourcer.request_policy", level="WARNING"):
             policy = RequestPolicy.from_env()
         self.assertEqual(policy.search_pacers["ddg"].interval, 2)
         self.assertEqual(policy.fetch_pacer.interval, 1)

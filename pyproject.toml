@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-harries-resourcer"
+description = "MCP web research and local Markdown notes with source-aware search"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "fisHarly0"}]
+keywords = ["mcp", "research", "search", "markdown"]
+dynamic = ["version", "dependencies"]
+
+[project.urls]
+Repository = "https://github.com/fisHarly0/mcp-harries-resourcer"
+Issues = "https://github.com/fisHarly0/mcp-harries-resourcer/issues"
+Documentation = "https://github.com/fisHarly0/mcp-harries-resourcer#readme"
+
+[project.scripts]
+mcp-harries-resourcer = "mcp_harries_resourcer.__main__:main"
+
+[tool.setuptools]
+packages = ["mcp_harries_resourcer"]
+
+[tool.setuptools.dynamic]
+version = {attr = "mcp_harries_resourcer.__version__"}
+dependencies = {file = ["requirements.txt"]}

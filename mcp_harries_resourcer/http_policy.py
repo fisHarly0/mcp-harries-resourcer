@@ -1,6 +1,6 @@
 """Bounded HTTP reads, polite recovery and per-origin Retry-After cooldowns."""
 import asyncio
-from task_cleanup import wait_for_owned
+from .task_cleanup import wait_for_owned
 from email.utils import parsedate_to_datetime
 import math
 import time

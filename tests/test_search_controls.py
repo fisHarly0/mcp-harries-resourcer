@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-import server
-from search_results import domain_matches, merge_results, normalize_domains, select_results, url_identity
+from mcp_harries_resourcer import server
+from mcp_harries_resourcer.search_results import domain_matches, merge_results, normalize_domains, select_results, url_identity
 
 
 def item(url, title="Result"):

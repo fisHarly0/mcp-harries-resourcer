@@ -13,7 +13,7 @@ import tempfile
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from local_search import DEFAULT_EXCLUDES, search
+from mcp_harries_resourcer.local_search import DEFAULT_EXCLUDES, search
 
 
 def baseline(root):
