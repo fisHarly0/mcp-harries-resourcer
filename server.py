@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import re
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,12 +37,23 @@ from page_content import content_warnings
 from parse_policy import ParseFailure, ParsePolicy
 from task_cleanup import cancel_and_wait, wait_for_owned
 from progress import CompletionCounter, report, with_progress
+from client_pool import ClientPool
 from search_results import merge_results, normalize_domains, select_results, url_identity
-
-mcp = FastMCP("resourcer")
 
 DEFAULT_TIMEOUT = 25.0
 FETCH_CONCURRENCY = 5
+HTTP_CLIENTS = ClientPool(lambda: httpx.AsyncClient(
+    timeout=DEFAULT_TIMEOUT, follow_redirects=True,
+    limits=httpx.Limits(max_connections=10, max_keepalive_connections=5, keepalive_expiry=30)))
+
+
+@asynccontextmanager
+async def server_lifespan(app):
+    async with HTTP_CLIENTS:
+        yield
+
+
+mcp = FastMCP("resourcer", lifespan=server_lifespan)
 NETWORK = RequestPolicy.from_env()
 PARSER = ParsePolicy.from_env()
 RESEARCH_ROOT = Path(
@@ -220,7 +232,7 @@ async def _search(query: str, max_results: int, strategy: str = "fallback",
         hints.append(f"({sites})" if len(include) > 1 else sites)
     hints.extend(f"-site:{d}" for d in exclude)
     engine_query = " ".join([*hints, query])
-    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as c:
+    async with HTTP_CLIENTS.lease() as c:
         if chinese:
             engines = [
                 ("Bing/zh-CN", lambda: _bing(c, engine_query, candidate_count, "zh-CN")),
@@ -631,7 +643,7 @@ async def fetch_page(
     if content_format not in {"text", "markdown"}:
         return _tool_error("content_format 必须是 text 或 markdown", response_format)
     report(0, 1, "正在读取网页（含等待、下载与解析）")
-    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as c:
+    async with HTTP_CLIENTS.lease() as c:
         res = await _fetch_one(c, url, max_chars, start_index, refresh, content_format)
     if res["ok"] and expected_content_id and res.get("content_id") != expected_content_id:
         res = {**res, "ok": False, "text": "", "error": "正文版本已变化，请从 start_index=0 重新读取"}
@@ -677,7 +689,7 @@ async def fetch_pages(urls: list[str], max_chars: int = 30000,
     unique_urls = list(dict.fromkeys(urls))
     report(0, len(unique_urls), f"准备读取 {len(unique_urls)} 个不同网页")
     progress = CompletionCounter(len(unique_urls), "网页读取")
-    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as c:
+    async with HTTP_CLIENTS.lease() as c:
         unique_results = await budget.collect(unique_urls, lambda u: progress.run(_fetch_one(c, u, max_chars, refresh=refresh, content_format=content_format)),
                                              concurrency=FETCH_CONCURRENCY)
     by_url = {url: _batch_page(url, result) for url, result in zip(unique_urls, unique_results)}
@@ -771,7 +783,7 @@ async def deep_research(
     top_urls = [it["url"] for it in items[:fetch_top_n]]
     progress = CompletionCounter(len(top_urls), "网页读取", offset=1)
 
-    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as c:
+    async with HTTP_CLIENTS.lease() as c:
         fetched = await budget.collect(top_urls, lambda u: progress.run(_fetch_one(c, u, 0, content_format=content_format)), concurrency=FETCH_CONCURRENCY)
     fetched = [_batch_page(url, result) for url, result in zip(top_urls, fetched)]
     for page in fetched:

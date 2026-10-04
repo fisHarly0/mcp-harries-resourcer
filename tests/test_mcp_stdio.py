@@ -15,8 +15,52 @@ from mcp.client.stdio import stdio_client
 from mcp import types
 from mcp.shared.exceptions import McpError
 
+LOCAL_HTTP_ENV = {"NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"}
+
 
 class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
+    async def test_http_connection_reuse_and_cookie_isolation_over_mcp(self):
+        requests, closed = [], threading.Event()
+        body = (Path(__file__).parent / "fixtures" / "technical_article.html").read_bytes()
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+            def do_GET(self):
+                requests.append((self.client_address[1], self.headers.get("Cookie")))
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Set-Cookie", "session=isolated; Path=/")
+                self.end_headers()
+                self.wfile.write(body)
+            def finish(self):
+                super().finish()
+                closed.set()
+            def log_message(self, *args):
+                pass
+        http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=http.serve_forever, daemon=True).start()
+        self.addCleanup(http.server_close)
+        self.addCleanup(http.shutdown)
+        params = StdioServerParameters(command=sys.executable,
+            args=[str(Path(__file__).resolve().parents[1] / "server.py")],
+            env={**os.environ, **LOCAL_HTTP_ENV, "RESOURCER_FETCH_RPM": "0"})
+        async def workflow():
+            async with stdio_client(params) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    for _ in range(2):
+                        result = await session.call_tool("fetch_page", {
+                            "url": f"http://127.0.0.1:{http.server_port}/article", "refresh": True, "response_format": "json"})
+                        self.assertFalse(result.isError)
+                        data = json.loads("\n".join(c.text for c in result.content if c.type == "text"))
+                        self.assertTrue(data["ok"], data)
+                        self.assertFalse(data["cached"])
+        await asyncio.wait_for(workflow(), 30)
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(requests[0][0], requests[1][0])
+        self.assertEqual([cookie for _, cookie in requests], [None, None])
+        self.assertTrue(await asyncio.to_thread(closed.wait, 3))
+
     async def test_progress_notifications_over_mcp(self):
         params = StdioServerParameters(command=sys.executable,
             args=[str(Path(__file__).parent / "fixtures" / "search_stdio.py")], env=dict(os.environ))
@@ -136,7 +180,7 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
         base = f"http://127.0.0.1:{http.server_port}"
         params = StdioServerParameters(command=sys.executable,
             args=[str(Path(__file__).resolve().parents[1] / "server.py")],
-            env={**os.environ, "RESOURCER_FETCH_RPM": "0", "RESOURCER_REQUEST_TIMEOUT_SECONDS": "30"})
+            env={**os.environ, **LOCAL_HTTP_ENV, "RESOURCER_FETCH_RPM": "0", "RESOURCER_REQUEST_TIMEOUT_SECONDS": "30"})
 
         async def workflow():
             async with stdio_client(params) as (read, write):
@@ -220,7 +264,7 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
         base = f"http://127.0.0.1:{http.server_port}"
         params = StdioServerParameters(command=sys.executable,
             args=[str(Path(__file__).resolve().parents[1] / "server.py")],
-            env={**os.environ, "RESOURCER_FETCH_RPM": "0", "RESOURCER_HTTP_RETRIES": "1",
+            env={**os.environ, **LOCAL_HTTP_ENV, "RESOURCER_FETCH_RPM": "0", "RESOURCER_HTTP_RETRIES": "1",
                  "RESOURCER_REQUEST_TIMEOUT_SECONDS": "3", "RESOURCER_RESPONSE_MAX_BYTES": "2048"})
 
         async def workflow():
@@ -319,7 +363,7 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
         params = StdioServerParameters(
             command=sys.executable,
             args=[str(Path(__file__).resolve().parents[1] / "server.py")],
-            env={**os.environ, "RESOURCER_FETCH_RPM": "0", "RESOURCER_CACHE_TTL_SECONDS": "300",
+            env={**os.environ, **LOCAL_HTTP_ENV, "RESOURCER_FETCH_RPM": "0", "RESOURCER_CACHE_TTL_SECONDS": "300",
                  "RESOURCER_CACHE_MAX_ENTRIES": "64", "RESOURCER_CACHE_MAX_BYTES": "8388608"},
         )
         async def workflow():
