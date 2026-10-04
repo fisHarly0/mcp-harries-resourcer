@@ -17,12 +17,13 @@ class BatchBudget:
         self.loop = asyncio.get_running_loop()
         self.started = self.loop.time()
         self.deadline = self.started + seconds
+        self.exhausted = False
         self.completed = 0
         self.timed_out = 0
         self.not_started = 0
 
     def remaining(self):
-        return max(0.0, self.deadline - self.loop.time())
+        return 0.0 if self.exhausted else max(0.0, self.deadline - self.loop.time())
 
     def metadata(self):
         return {
@@ -59,7 +60,12 @@ class BatchBudget:
                      for _ in range(min(concurrency, len(items)))]
         try:
             if tasks:
-                await asyncio.wait(tasks, timeout=self.remaining())
+                _, pending_tasks = await asyncio.wait(tasks, timeout=self.remaining())
+                if pending_tasks:
+                    # Timer resolution can wake wait() just before loop.time()
+                    # crosses the deadline (notably on Windows). Once it fires,
+                    # the next stage must not regain that fractional budget.
+                    self.exhausted = True
                 # A worker cancelling itself must propagate cancellation, not look like timeout.
                 if any(task.cancelled() for task in tasks):
                     raise asyncio.CancelledError()

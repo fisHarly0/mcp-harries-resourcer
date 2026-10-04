@@ -67,6 +67,21 @@ class BatchBudgetTests(unittest.IsolatedAsyncioTestCase):
         operation.assert_not_called()
         self.assertEqual(values, [Unfinished(False), Unfinished(False)])
 
+    async def test_early_timer_signal_cannot_restart_next_stage(self):
+        budget = BatchBudget(60)
+        async def early_timeout(tasks, **kwargs):
+            await asyncio.sleep(0)
+            return set(), set(tasks)
+        with patch("batch_budget.asyncio.wait", side_effect=early_timeout):
+            first = await budget.collect([0], lambda _: asyncio.Event().wait())
+        self.assertEqual(first, [Unfinished(True)])
+        self.assertTrue(budget.metadata()["deadline_exceeded"])
+        self.assertEqual(budget.remaining(), 0)
+        operation = AsyncMock()
+        second = await budget.collect([1], operation)
+        self.assertEqual(second, [Unfinished(False)])
+        operation.assert_not_called()
+
     async def test_external_cancellation_propagates_after_worker_cleanup(self):
         entered = asyncio.Event()
         cleaned = []
