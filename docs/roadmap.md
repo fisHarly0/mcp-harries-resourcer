@@ -8,7 +8,7 @@
 - 已实现中文优先 Bing / 其他优先 DuckDuckGo、失败诊断、进程内限速、TTL/LRU 缓存、并发下载复用。
 - `87e47a5` 已发布；50 项测试在 Windows / Linux、Python 3.10 / 3.12 上通过。
 
-## 本批：按需阅读与可靠续读
+## 已发布：按需阅读与可靠续读
 
 状态：已实现；本地 66 项测试和真实 MCP 联网分页/刷新验证通过，跨平台结果以 [Actions](https://github.com/fisHarly0/mcp-harries-resourcer/actions/workflows/tests.yml) 为准。
 
@@ -25,11 +25,17 @@
 
 参考：[DuckDuckGo MCP Server](https://github.com/nickclyde/duckduckgo-mcp-server) 的分页、缓存与上下文控制。实现独立编写，保留本项目已有参数和默认文本输出。
 
+## 本批：搜索来源控制与合并
+
+已实现包含／排除域名校验、可选双引擎交替合并、规范化 URL 去重、引擎原始排名与查询来源保留、搜索 JSON。中文站点快捷搜索现在会实际检查返回域名；调研只抓取通过筛选的结果。
+
+本地 85 项测试通过，包含真实 MCP 协议；固定中英文联网查询发现英文官方来源可用，中文候选被过滤后遇到后备引擎验证限制。过滤有效，但尚无证据证明合并普遍提高相关性，因此保持可选。完整参数、边界和实测见 [搜索说明](search.md)。跨平台发布结果以 [Actions](https://github.com/fisHarly0/mcp-harries-resourcer/actions/workflows/tests.yml) 为准。
+
 ## 后续批次
 
 | 方向 | 要解决的实际问题 | 借鉴与候选方案 | 验收依据 |
 |---|---|---|---|
-| 搜索质量与来源控制 | 首个有结果的引擎不一定最相关；`site:` 也未必严格过滤 | 可选 [SearXNG 后端](https://github.com/ihor-sokoliuk/mcp-searxng)、域名过滤、多来源去重；以实测质量决定默认策略 | 中英文固定查询集、真实来源链接、跨引擎失败与降级检查 |
+| 搜索质量与覆盖率 | 已补域名校验与多来源去重；中文实测仍受引擎结果和验证限制影响 | 评估可选 [SearXNG 后端](https://github.com/ihor-sokoliuk/mcp-searxng)、查询策略和相关性排序；以实测质量决定默认策略 | 扩大中英文固定查询集、真实来源链接、跨引擎失败与降级检查 |
 | 网络恢复与资源预算 | 限流后继续请求、异常大响应和长批次可能耗费时间与内存 | 有界重试、Retry-After、请求总预算、流式大小上限；参考 [Firecrawl MCP](https://github.com/firecrawl/firecrawl-mcp-server) 的任务反馈方式 | 本地 HTTP 场景测试、取消与超时验证、资源上限证据 |
 | 内容提取与引用 | 技术文档中的代码块、表格和链接需要更好保留 | 评估 Markdown 模式、正文质量标记、最终 URL 与来源元数据 | 文档/博客/表格/乱码/空页面样本；对照可读正文，不只验证 HTTP 成功 |
 | 本地资料库 | 文件变多后递归逐文件搜索变慢，笔记元数据难筛选 | 改进目录遍历、按集合/标签/来源检索；必要时评估本地全文索引 | 大资料目录性能、更新与删除一致性、跳过无关目录 |

@@ -31,6 +31,7 @@ from bs4 import BeautifulSoup
 from mcp.server.fastmcp import FastMCP
 
 from request_policy import RequestPolicy
+from search_results import merge_results, normalize_domains, select_results, url_identity
 
 mcp = FastMCP("resourcer")
 
@@ -124,6 +125,19 @@ class SearchEngineError(Exception):
 class SearchOutcome:
     items: list[dict] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
+    attempts: list[dict] = field(default_factory=list)
+    filtered_count: int = 0
+    strategy: str = "fallback"
+    include_domains: list[str] = field(default_factory=list)
+    exclude_domains: list[str] = field(default_factory=list)
+
+    @property
+    def status(self) -> str:
+        if self.items:
+            return "results"
+        if self.failures:
+            return "incomplete"
+        return "filtered_empty" if self.filtered_count else "no_results"
 
 
 def _parse_search_response(response: httpx.Response, engine: str, max_results: int) -> list[dict]:
@@ -174,52 +188,104 @@ async def _bing(client: httpx.AsyncClient, query: str, max_results: int, mkt: st
     return _parse_search_response(response, "bing", max_results)
 
 
-async def _search(query: str, max_results: int) -> SearchOutcome:
-    """按 query 语言路由引擎，互相 fallback。"""
+async def _search(query: str, max_results: int, strategy: str = "fallback",
+                  include_domains: list[str] | None = None,
+                  exclude_domains: list[str] | None = None) -> SearchOutcome:
+    """Route by language, enforce domains locally, optionally merge engines."""
+    if strategy not in {"fallback", "merge"}:
+        raise ValueError("strategy 必须是 fallback 或 merge")
+    include = normalize_domains(include_domains)
+    exclude = normalize_domains(exclude_domains)
+    outcome = SearchOutcome(strategy=strategy, include_domains=include, exclude_domains=exclude)
     if not query.strip():
-        return SearchOutcome(failures=["关键词不能为空"])
+        outcome.failures.append("关键词不能为空")
+        return outcome
     max_results = max(1, min(int(max_results), 50))
+    candidate_count = min(50, max(10, max_results * 3)) if include or exclude else max_results
     chinese = _has_chinese(query)
-    outcome = SearchOutcome()
+    hints = []
+    if include:
+        sites = " OR ".join(f"site:{d}" for d in include)
+        hints.append(f"({sites})" if len(include) > 1 else sites)
+    hints.extend(f"-site:{d}" for d in exclude)
+    engine_query = " ".join([*hints, query])
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as c:
         if chinese:
             engines = [
-                ("Bing/zh-CN", lambda: _bing(c, query, max_results, "zh-CN")),
-                ("DuckDuckGo", lambda: _ddg(c, query, max_results)),
+                ("Bing/zh-CN", lambda: _bing(c, engine_query, candidate_count, "zh-CN")),
+                ("DuckDuckGo", lambda: _ddg(c, engine_query, candidate_count)),
             ]
         else:
             engines = [
-                ("DuckDuckGo", lambda: _ddg(c, query, max_results)),
-                ("Bing/en-US", lambda: _bing(c, query, max_results, "en-US")),
-                ("Bing/zh-CN", lambda: _bing(c, query, max_results, "zh-CN")),
+                ("DuckDuckGo", lambda: _ddg(c, engine_query, candidate_count)),
+                ("Bing/en-US", lambda: _bing(c, engine_query, candidate_count, "en-US")),
             ]
-        for name, fetch in engines:
+            if strategy == "fallback":
+                engines.append(("Bing/zh-CN", lambda: _bing(c, engine_query, candidate_count, "zh-CN")))
+
+        async def attempt(name, fetch):
+            failure = ""
             try:
                 res = await fetch()
-                if res:
-                    outcome.items = res
-                    return outcome
+                selected, rejected = select_results(res, name, include, exclude)
+                return selected, {"engine": name, "status": "success", "returned": len(res),
+                                  "accepted": len(selected), "filtered": rejected}, ""
             except httpx.TimeoutException:
-                outcome.failures.append(f"{name}：请求超时")
+                failure = "请求超时"
             except httpx.HTTPStatusError as exc:
-                outcome.failures.append(f"{name}：HTTP {exc.response.status_code}")
+                failure = f"HTTP {exc.response.status_code}"
             except httpx.RequestError:
-                outcome.failures.append(f"{name}：网络连接失败")
+                failure = "网络连接失败"
             except SearchEngineError as exc:
-                outcome.failures.append(f"{name}：{exc}")
+                failure = str(exc)
+            return [], {"engine": name, "status": "failed", "error": failure}, f"{name}：{failure}"
+
+        def record(result):
+            items, metadata, failure = result
+            outcome.attempts.append(metadata)
+            outcome.filtered_count += metadata.get("filtered", 0)
+            if failure:
+                outcome.failures.append(failure)
+            return items
+
+        if strategy == "merge":
+            results = await asyncio.gather(*(attempt(name, fetch) for name, fetch in engines))
+            outcome.items = merge_results([record(result) for result in results], max_results)
+        else:
+            for name, fetch in engines:
+                selected = record(await attempt(name, fetch))
+                if selected:
+                    outcome.items = merge_results([selected], max_results)
+                    break
     return outcome
 
 
 def _search_notes(outcome: SearchOutcome) -> str:
-    if not outcome.failures:
+    notes = list(outcome.failures)
+    if outcome.filtered_count:
+        notes.append(f"已排除 {outcome.filtered_count} 条不符合域名条件或 URL 无效的候选结果；仅检查本次引擎返回的候选。")
+    if not notes:
         return ""
-    return "\n\n搜索诊断：\n" + "\n".join(f"- {failure}" for failure in outcome.failures)
+    return "\n\n搜索诊断：\n" + "\n".join(f"- {note}" for note in notes)
 
 
 def _format_search(query: str, outcome: SearchOutcome) -> str:
     if not outcome.items and outcome.failures:
         return f"搜索未完成：无法确认 “{query}” 是否有相关结果。" + _search_notes(outcome)
+    if outcome.status == "filtered_empty":
+        return f"本次候选中没有符合筛选条件的结果：{query}" + _search_notes(outcome)
     return _format_results(query, outcome.items) + _search_notes(outcome)
+
+
+def _search_payload(query: str, outcome: SearchOutcome) -> dict:
+    return {
+        "ok": bool(outcome.items) or not outcome.failures,
+        "query": query, "search_status": outcome.status,
+        "complete": not bool(outcome.failures), "strategy": outcome.strategy,
+        "include_domains": outcome.include_domains, "exclude_domains": outcome.exclude_domains,
+        "results": outcome.items, "diagnostics": outcome.failures,
+        "attempts": outcome.attempts, "filtered_count": outcome.filtered_count,
+    }
 
 
 def _format_results(query: str, items: list[dict]) -> str:
@@ -227,7 +293,7 @@ def _format_results(query: str, items: list[dict]) -> str:
         return f"未找到 “{query}” 的相关结果"
     lines = [f"# 搜索结果：{query}（{len(items)} 条）"]
     for i, it in enumerate(items, 1):
-        src = it.get("source", "")
+        src = ", ".join(dict.fromkeys(p["engine"] for p in it.get("provenance", []))) or it.get("source", "")
         lines.append(f"\n## {i}. {it['title']}  `[{src}]`")
         lines.append(f"<{it['url']}>")
         if it["snippet"]:
@@ -316,62 +382,120 @@ async def _fetch_uncached(client: httpx.AsyncClient, url: str) -> dict:
 # ───────────────────────── tools: search ─────────────────────────
 
 @mcp.tool()
-async def web_search(query: str, max_results: int = 10) -> str:
+async def web_search(
+    query: str, max_results: int = 10,
+    strategy: Literal["fallback", "merge"] = "fallback",
+    include_domains: list[str] | None = None, exclude_domains: list[str] | None = None,
+    response_format: Literal["text", "json"] = "text",
+) -> str:
     """通用网页搜索（中文优先 Bing，其他优先 DDG；失败自动切换并报告诊断）。
 
     Args:
         query: 关键词，可用 site: filetype: 高级语法
         max_results: 1-50
+        strategy: fallback 首个有效引擎；merge 同时查询两个引擎并交替合并
+        include_domains: 仅返回这些裸域名及其子域名；不填表示不限
+        exclude_domains: 排除这些裸域名及其子域名，优先于 include_domains
+        response_format: text 或 json；JSON 保留引擎、原始排名和失败诊断
     """
     max_results = max(1, min(int(max_results), 50))
-    outcome = await _search(query, max_results)
+    try:
+        outcome = await _search(query, max_results, strategy, include_domains, exclude_domains)
+    except ValueError as exc:
+        return _tool_error(str(exc), response_format)
+    if response_format == "json":
+        return json.dumps(_search_payload(query, outcome), ensure_ascii=False)
     return _format_search(query, outcome)
 
 
 @mcp.tool()
-async def web_search_multi(queries: list[str], per_query: int = 8) -> str:
+async def web_search_multi(
+    queries: list[str], per_query: int = 8,
+    strategy: Literal["fallback", "merge"] = "fallback",
+    include_domains: list[str] | None = None, exclude_domains: list[str] | None = None,
+    response_format: Literal["text", "json"] = "text",
+) -> str:
     """并发搜索多个 query，结果按 query 分组并去重。
 
     Args:
         queries: 关键词列表
         per_query: 每个 query 返回多少条（1-30）
+        strategy: fallback 或 merge，作用于每个 query
+        include_domains: 仅保留指定裸域名及其子域名
+        exclude_domains: 排除指定裸域名及其子域名
+        response_format: text 或 json；JSON 的 queries 保留每个查询关联的结果 URL
     """
     per_query = max(1, min(int(per_query), 30))
     if not queries:
-        return "queries 不能为空"
+        return _tool_error("queries 不能为空", response_format)
+    try:
+        include_domains = normalize_domains(include_domains)
+        exclude_domains = normalize_domains(exclude_domains)
+        if strategy not in {"fallback", "merge"}:
+            raise ValueError("strategy 必须是 fallback 或 merge")
+    except ValueError as exc:
+        return _tool_error(str(exc), response_format)
 
-    results = await asyncio.gather(*[_search(q, per_query) for q in queries], return_exceptions=True)
+    results = await asyncio.gather(*[
+        _search(q, per_query, strategy, include_domains, exclude_domains) for q in queries
+    ], return_exceptions=True)
 
     seen_urls = set()
     blocks = []
+    query_payloads = []
+    all_groups = []
     total = 0
     for q, res in zip(queries, results):
         if isinstance(res, Exception):
-            blocks.append(f"# {q}\n搜索失败：{res}")
-            continue
+            res = SearchOutcome(failures=[f"查询失败：{type(res).__name__}"], strategy=strategy,
+                                include_domains=include_domains, exclude_domains=exclude_domains)
+        payload = _search_payload(q, res)
+        payload.pop("results")
+        payload["result_urls"] = [it.get("canonical_url") or url_identity(it["url"])[0] for it in res.items]
+        query_payloads.append(payload)
+        all_groups.append([
+            {**it, "provenance": [{**p, "query": q} for p in it.get("provenance", [])]}
+            for it in res.items
+        ])
         unique = []
         for it in res.items:
-            if it["url"] in seen_urls:
+            key = it.get("canonical_url") or url_identity(it["url"])[0]
+            if key in seen_urls:
                 continue
-            seen_urls.add(it["url"])
+            seen_urls.add(key)
             unique.append(it)
         total += len(unique)
         if res.items and not unique:
             blocks.append(f"# {q}\n结果与前面的查询重复，已全部去重。" + _search_notes(res))
         else:
-            blocks.append(_format_search(q, SearchOutcome(unique, res.failures)))
+            blocks.append(_format_search(q, SearchOutcome(unique, res.failures, res.attempts, res.filtered_count)))
+    if response_format == "json":
+        combined = merge_results(all_groups, total)
+        for item in combined:
+            item["queries"] = list(dict.fromkeys(
+                p["query"] for p in query_payloads if item["canonical_url"] in p["result_urls"]
+            ))
+        return json.dumps({"ok": all(p["ok"] for p in query_payloads),
+                           "complete": all(p["complete"] for p in query_payloads),
+                           "results": combined, "queries": query_payloads}, ensure_ascii=False)
     header = f"# 多查询搜索（{len(queries)} 个 query，去重后 {total} 条）\n"
     return header + "\n\n---\n\n".join(blocks)
 
 
 @mcp.tool()
-async def search_chinese(query: str, site: str = "zhihu", max_results: int = 10) -> str:
-    """中文站点定向搜索（site: 限定）。
+async def search_chinese(
+    query: str, site: str = "zhihu", max_results: int = 10,
+    strategy: Literal["fallback", "merge"] = "fallback",
+    response_format: Literal["text", "json"] = "text",
+) -> str:
+    """中文站点定向搜索（site: 提示并逐条校验返回链接的域名）。
 
     Args:
         query: 关键词
         site: zhihu | bilibili | weixin | jianshu | csdn | xueqiu
         max_results: 返回条数
+        strategy: fallback 或 merge
+        response_format: text 或 json
     """
     site_map = {
         "zhihu": "zhihu.com", "bilibili": "bilibili.com",
@@ -380,8 +504,8 @@ async def search_chinese(query: str, site: str = "zhihu", max_results: int = 10)
     }
     domain = site_map.get(site.lower())
     if not domain:
-        return f"不支持的 site：{site}（支持：{', '.join(site_map)}）"
-    return await web_search(f"site:{domain} {query}", max_results)
+        return _tool_error(f"不支持的 site：{site}（支持：{', '.join(site_map)}）", response_format)
+    return await web_search(query, max_results, strategy, [domain], response_format=response_format)
 
 
 # ───────────────────────── tools: fetch ─────────────────────────
@@ -468,6 +592,9 @@ async def deep_research(
     max_chars_each: int = 20000,
     max_total_chars: int = 60000,
     response_format: Literal["text", "json"] = "text",
+    strategy: Literal["fallback", "merge"] = "fallback",
+    include_domains: list[str] | None = None,
+    exclude_domains: list[str] | None = None,
 ) -> str:
     """搜索并抓取前 N 条正文，返回资料包供调用方总结；不自动写文件。
 
@@ -478,17 +605,21 @@ async def deep_research(
         max_chars_each: 每篇正文截断长度；0 = 不截断
         max_total_chars: 本次返回的正文总字符预算；默认 60000，0 = 不限制。不含标题、索引和诊断
         response_format: text 或 json；JSON 保留来源、分页位置、抓取时间和诊断
+        strategy: fallback 或 merge
+        include_domains: 搜索结果仅保留指定裸域名及其子域名（不限制正文请求的 HTTP 跳转）
+        exclude_domains: 搜索结果排除指定裸域名及其子域名
     """
     if min(max_chars_each, max_total_chars) < 0:
         return _tool_error("max_chars_each 和 max_total_chars 必须是非负整数", response_format)
-    outcome = await _search(query, num_results)
+    try:
+        outcome = await _search(query, num_results, strategy, include_domains, exclude_domains)
+    except ValueError as exc:
+        return _tool_error(str(exc), response_format)
     items = outcome.items
     if not items:
         if response_format == "json":
             return json.dumps({
-                "ok": not bool(outcome.failures), "query": query,
-                "search_status": "incomplete" if outcome.failures else "no_results",
-                "results": [], "pages": [], "diagnostics": outcome.failures,
+                **_search_payload(query, outcome), "pages": [],
             }, ensure_ascii=False)
         return _format_search(query, outcome)
 
@@ -521,14 +652,14 @@ async def deep_research(
     returned_chars = sum(len(f["text"]) for f in fetched)
     if response_format == "json":
         return json.dumps({
-            "ok": ok_count == fetch_top_n, "query": query, "search_status": "results",
-            "results": items, "pages": fetched, "diagnostics": outcome.failures,
+            **_search_payload(query, outcome),
+            "ok": ok_count == fetch_top_n, "pages": fetched,
             "requested_pages": fetch_top_n, "successful_pages": ok_count,
             "returned_body_chars": returned_chars, "max_total_chars": max_total_chars,
         }, ensure_ascii=False)
     out = [f"# 深度调研：{query}", f"_共 {len(items)} 条搜索结果，尝试抓取 {fetch_top_n} 篇，成功 {ok_count} 篇_\n"]
     out.append(f"_本次返回正文 {returned_chars} 字符；总预算：{max_total_chars or '不限'}。_\n")
-    if outcome.failures:
+    if outcome.failures or outcome.filtered_count:
         out.append(_search_notes(outcome))
     out.append("## 📋 结果索引\n")
     for i, it in enumerate(items, 1):

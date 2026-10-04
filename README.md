@@ -10,7 +10,7 @@ Resourcer 是一个轻量 MCP 资料工具，把网页搜索、正文提取和�
 
 不需要搜索 API Key。服务通过 stdio 运行；网页搜索和抓取仍会向搜索引擎及目标网站发送网络请求。支持 Claude Code，以及能启动 stdio MCP 服务的其他客户端。
 
-[快速开始](#快速开始) · [使用演示](docs/usage-example.md) · [分页与 JSON](docs/reading.md) · [工具列表](#工具) · [配置](#限速与正文缓存) · [优化路线](docs/roadmap.md)
+[快速开始](#快速开始) · [使用演示](docs/usage-example.md) · [搜索与来源筛选](docs/search.md) · [分页与 JSON](docs/reading.md) · [工具列表](#工具) · [配置](#限速与正文缓存) · [优化路线](docs/roadmap.md)
 
 ## 适合做什么
 
@@ -21,6 +21,8 @@ Resourcer 是一个轻量 MCP 资料工具，把网页搜索、正文提取和�
 内置跨调用限速、最多 5 路正文抓取和有容量上限的短时缓存。重复读取可以复用完整正文，保存同名资料不会覆盖旧文件。
 
 长文支持分页续读和正文版本校验；需要新内容时可单次刷新。单页、批量和调研工具支持 JSON 输出，调研资料包可限制正文总长度，按需读取剩余页面。
+
+搜索支持包含／排除域名，并逐条校验返回链接。需要扩大来源覆盖时，可选择 `strategy="merge"` 同时查询两个引擎；去重后保留各引擎的原始链接和排名。搜索工具也支持 JSON 输出。
 
 ```mermaid
 flowchart LR
@@ -83,12 +85,12 @@ claude mcp list
 
 | 工具 | 用途 |
 |---|---|
-| `web_search` | 中文优先 Bing，其他查询优先 DuckDuckGo；无结果或失败时切换引擎，失败附诊断 |
-| `web_search_multi` | 并发搜索多个关键词，按查询分组，并跨查询去重 |
-| `search_chinese` | 知乎、B站、微信公众号、简书、CSDN、雪球的 `site:` 定向搜索 |
+| `web_search` | 默认依次切换引擎，可选双引擎合并；包含／排除域名、来源排名和 JSON |
+| `web_search_multi` | 并发搜索多个关键词、跨查询去重；支持相同筛选，JSON 保留每条结果关联的查询 |
+| `search_chinese` | 知乎、B站、微信公众号、简书、CSDN、雪球定向搜索，校验实际返回域名 |
 | `fetch_page` | 单页正文、分页续读、版本校验、单次刷新；支持 JSON 元数据 |
 | `fetch_pages` | 批量正文与刷新；共享最多 5 个网络抓取名额和限速，返回每页状态与续读位置 |
-| `deep_research` | 搜索并抓取前 N 条正文，按总正文预算返回资料包；支持 JSON，不自动总结或保存 |
+| `deep_research` | 搜索、筛选并抓取前 N 条正文，支持双引擎合并和总正文预算；支持 JSON，不自动总结或保存 |
 | `search_local` | 在指定本地目录搜索文本，返回文件路径和行号 |
 | `save_finding` | 保存带元数据的 Markdown；同秒同标题自动添加序号，保留已有文件 |
 
@@ -132,6 +134,7 @@ claude mcp add --scope user resourcer -e RESOURCER_RESEARCH_ROOT=D:\research -- 
 |---|---|
 | 搜索结果 + 搜索诊断 | 前面的引擎失败，后备引擎找到了结果；可以继续使用返回的来源 |
 | 未找到相关结果 | 所有尝试的引擎均返回了可识别的无结果页面；可换关键词 |
+| 本次候选中没有符合筛选条件的结果 | 有候选链接，但全部被域名或 URL 校验排除；不表示目标站点没有相关资料 |
 | 搜索未完成 | 存在限流、网络故障、验证码或未知页面；不能据此判断没有资料 |
 | 限流（HTTP 429） | 降低频率，稍后重试；服务会先尝试后备引擎 |
 | 解析失败 | 未识别结果页结构，可能是引擎改版或拦截；保留诊断以便排查 |
@@ -154,15 +157,19 @@ macOS / Linux 使用 `.venv/bin/python -m unittest discover -s tests -v`。
 
 分页、刷新、版本变化和 JSON 参数还会通过本地 HTTP 页面与真实 MCP 子进程验证。当前持续优化方向与各批次验收条件见 [优化路线](docs/roadmap.md)。
 
+可选的真实搜索检查：`python scripts/search_smoke.py --output <结果文件.json>`。它通过真实 MCP 子进程比较固定中英文查询的两种策略，会访问搜索引擎；输出链接、耗时、来源、筛选数量和失败原因。没有结果时域名检查标记为 `null`，不能据此声称搜索质量达标。实测记录见 [搜索说明](docs/search.md#本批验证)。
+
 ### 项目结构
 
 ```text
 mcp-harries-resourcer/
 ├── server.py              # 8 个 MCP 工具、搜索解析与资料保存
 ├── request_policy.py      # 请求限速、缓存和重复下载复用
+├── search_results.py      # 域名筛选、URL 去重与来源合并
 ├── requirements.txt       # Python 依赖
 ├── docs/                  # 使用示例、项目对比与验证记录
 ├── tests/                 # 回归测试与固定 HTML 样本
+├── scripts/               # 可选的真实搜索验证
 └── .github/workflows/     # Windows / Linux 自动检查
 ```
 
@@ -176,7 +183,8 @@ mcp-harries-resourcer/
 
 - 依赖公开搜索页面，免搜索 API Key，但可用性会受网络、引擎限流和页面改版影响。
 - Bing 若把搜索请求重定向到首页，会补试一次 `www.bing.com/search`；仍失败时切换后备引擎并报告诊断。
-- `site:` 的最终行为由搜索引擎决定，不能保证每条结果都符合预期。
+- 手写 `site:` 只作为引擎提示；需要严格筛选时使用 `include_domains` / `exclude_domains` 或 `search_chinese`。筛选只检查搜索结果链接，不约束后续正文抓取的 HTTP 跳转。
+- 合并模式交替取两个引擎的结果，会增加请求量；没有语义重排，不保证相关性高于默认模式。筛选后的结果可能少于请求数量。
 - 正文提取不运行浏览器，不支持登录后的内容、验证码或复杂 JavaScript 页面。
 - `deep_research` 是资料收集工具；模型总结、事实核对和保存需要调用方继续执行。
 - 服务使用 stdio，不监听 HTTP 端口；这不等于离线运行。只在受信任的本地客户端中使用，因为工具能读取指定目录并保存文件。

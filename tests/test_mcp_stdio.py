@@ -14,6 +14,41 @@ from mcp.client.stdio import stdio_client
 
 
 class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
+    async def test_search_controls_over_mcp(self):
+        params = StdioServerParameters(command=sys.executable, args=[
+            str(Path(__file__).parent / "fixtures" / "search_stdio.py")], env=dict(os.environ))
+
+        async def workflow():
+            async with stdio_client(params) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    listed = await session.list_tools()
+                    for name in ["web_search", "web_search_multi", "deep_research"]:
+                        schema = next(t.inputSchema for t in listed.tools if t.name == name)
+                        self.assertIn("include_domains", schema["properties"])
+                        self.assertEqual(schema["properties"]["strategy"]["enum"], ["fallback", "merge"])
+
+                    async def call(name, **options):
+                        result = await session.call_tool(name, {"response_format": "json", **options})
+                        self.assertFalse(result.isError)
+                        return json.loads("\n".join(c.text for c in result.content if c.type == "text"))
+
+                    result = await call("web_search", query="python", strategy="merge", include_domains=["python.org"])
+                    self.assertEqual(len(result["results"]), 1)
+                    self.assertEqual(len(result["results"][0]["provenance"]), 2)
+                    self.assertEqual(result["filtered_count"], 1)
+                    batch = await call("web_search_multi", queries=["python", "异步"], strategy="merge", include_domains=["python.org"])
+                    self.assertEqual(len(batch["results"]), 1)
+                    self.assertEqual(batch["results"][0]["queries"], ["python", "异步"])
+                    invalid = await call("web_search", query="python", include_domains=["https://python.org"])
+                    self.assertFalse(invalid["ok"])
+                    chinese = await call("search_chinese", query="异步", site="zhihu")
+                    self.assertEqual(chinese["search_status"], "filtered_empty")
+                    research = await call("deep_research", query="python", include_domains=["python.org"], fetch_top_n=0)
+                    self.assertEqual(research["search_status"], "results")
+                    self.assertEqual(research["pages"], [])
+        await asyncio.wait_for(workflow(), timeout=30)
+
     async def test_paginated_json_and_refresh_over_mcp(self):
         state = {"version": "alpha", "requests": 0}
         class Handler(BaseHTTPRequestHandler):
