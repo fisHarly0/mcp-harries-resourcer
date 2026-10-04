@@ -17,6 +17,42 @@ from mcp.shared.exceptions import McpError
 
 
 class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
+    async def test_progress_notifications_over_mcp(self):
+        params = StdioServerParameters(command=sys.executable,
+            args=[str(Path(__file__).parent / "fixtures" / "search_stdio.py")], env=dict(os.environ))
+        async def workflow():
+            async with stdio_client(params) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    listed = await session.list_tools()
+                    for tool in listed.tools:
+                        self.assertNotIn("ctx", tool.inputSchema.get("properties", {}))
+                    async def tracked(name, arguments):
+                        events, returned = [], False
+                        async def progress(value, total, message):
+                            self.assertFalse(returned)
+                            events.append((value, total, message))
+                        result = await session.call_tool(name, {"response_format": "json", **arguments}, progress_callback=progress)
+                        returned = True
+                        self.assertFalse(result.isError)
+                        values = [e[0] for e in events]
+                        self.assertTrue(values)
+                        self.assertEqual(values, sorted(set(values)))
+                        return json.loads("\n".join(c.text for c in result.content if c.type == "text")), events
+                    multi, chinese = await asyncio.gather(
+                        tracked("web_search_multi", {"queries": ["python", "异步"]}),
+                        tracked("search_chinese", {"query": "异步", "site": "zhihu"}))
+                    self.assertEqual(multi[1][-1][:2], (2, 2))
+                    self.assertEqual(chinese[1][-1][:2], (1, 1))
+                    partial, events = await tracked("web_search_multi", {
+                        "queries": ["budget"], "strategy": "merge", "time_budget_seconds": 0.2})
+                    self.assertTrue(partial["batch"]["deadline_exceeded"])
+                    self.assertLess(events[-1][0], events[-1][1])
+                    research, events = await tracked("deep_research", {"query": "python", "fetch_top_n": 0})
+                    self.assertEqual(research["pages"], [])
+                    self.assertEqual(events[-1][:2], (1, 1))
+        await asyncio.wait_for(workflow(), 30)
+
     async def test_parser_cleanup_on_mcp_cancel_and_batch_deadline(self):
         with tempfile.TemporaryDirectory() as tmp:
             marker = Path(tmp) / "started"
@@ -28,12 +64,15 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
                     async with ClientSession(read, write) as session:
                         await session.initialize()
                         await session.list_tools()  # Warm SDK tool metadata before capturing the request id.
-                        async def call(name, **arguments):
-                            result = await session.call_tool(name, arguments)
+                        async def call(name, progress=None, **arguments):
+                            result = await session.call_tool(name, arguments, progress_callback=progress)
                             self.assertFalse(result.isError)
                             return json.loads("\n".join(c.text for c in result.content if c.type == "text"))
                         request_id = session._request_id
-                        request = asyncio.create_task(call("fetch_page", url="https://example.org/slow", response_format="json"))
+                        notifications = []
+                        async def progress(value, total, message):
+                            notifications.append((value, total))
+                        request = asyncio.create_task(call("fetch_page", url="https://example.org/slow", response_format="json", progress=progress))
                         async def started():
                             while not marker.exists():
                                 await asyncio.sleep(0.01)
@@ -51,6 +90,7 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
                                     return state
                                 await asyncio.sleep(0.01)
                         self.assertEqual((await asyncio.wait_for(cleaned(), 10))["cached"], 0)
+                        self.assertEqual(notifications, [(0, 1)])
                         partial = await call("fetch_pages", urls=["https://example.org/slow"],
                                              response_format="json", time_budget_seconds=1)
                         self.assertEqual(partial["pages"][0]["error_code"], "batch_deadline")

@@ -27,7 +27,7 @@ from urllib.parse import quote_plus, parse_qs, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 from request_policy import RequestPolicy
 from http_policy import HTTPPolicyError
@@ -35,6 +35,7 @@ from batch_budget import BatchBudget, Unfinished
 from page_content import content_warnings
 from parse_policy import ParseFailure, ParsePolicy
 from task_cleanup import cancel_and_wait, wait_for_owned
+from progress import CompletionCounter, report, with_progress
 from search_results import merge_results, normalize_domains, select_results, url_identity
 
 mcp = FastMCP("resourcer")
@@ -458,11 +459,13 @@ async def _fetch_uncached(client: httpx.AsyncClient, url: str) -> dict:
 # ───────────────────────── tools: search ─────────────────────────
 
 @mcp.tool()
+@with_progress
 async def web_search(
     query: str, max_results: int = 10,
     strategy: Literal["fallback", "merge"] = "fallback",
     include_domains: list[str] | None = None, exclude_domains: list[str] | None = None,
     response_format: Literal["text", "json"] = "text",
+    ctx: Context = None,
 ) -> str:
     """通用网页搜索（中文优先 Bing，其他优先 DDG；失败自动切换并报告诊断）。
 
@@ -475,22 +478,26 @@ async def web_search(
         response_format: text 或 json；JSON 保留引擎、原始排名和失败诊断
     """
     max_results = max(1, min(int(max_results), 50))
+    report(0, 1, "正在搜索网页")
     try:
         outcome = await _search(query, max_results, strategy, include_domains, exclude_domains)
     except ValueError as exc:
         return _tool_error(str(exc), response_format)
+    report(1, 1, f"搜索已结束：{len(outcome.items)} 条来源" + ("，存在失败诊断" if outcome.failures else ""))
     if response_format == "json":
         return json.dumps(_search_payload(query, outcome), ensure_ascii=False)
     return _format_search(query, outcome)
 
 
 @mcp.tool()
+@with_progress
 async def web_search_multi(
     queries: list[str], per_query: int = 8,
     strategy: Literal["fallback", "merge"] = "fallback",
     include_domains: list[str] | None = None, exclude_domains: list[str] | None = None,
     response_format: Literal["text", "json"] = "text",
     time_budget_seconds: float = 120,
+    ctx: Context = None,
 ) -> str:
     """并发搜索多个 query，结果按 query 分组并去重。
 
@@ -517,10 +524,12 @@ async def web_search_multi(
 
     snapshots = [SearchOutcome(strategy=strategy, include_domains=include_domains,
                                exclude_domains=exclude_domains) for _ in queries]
+    report(0, len(queries), f"准备搜索 {len(queries)} 个查询")
+    progress = CompletionCounter(len(queries), "查询", successful=lambda outcome: bool(outcome.items) or not outcome.failures)
 
     async def search_index(index):
-        return await _search(queries[index], per_query, strategy, include_domains, exclude_domains,
-                             snapshot=snapshots[index])
+        return await progress.run(_search(queries[index], per_query, strategy, include_domains, exclude_domains,
+                                          snapshot=snapshots[index]))
 
     results = await budget.collect(list(range(len(queries))), search_index)
 
@@ -568,10 +577,12 @@ async def web_search_multi(
 
 
 @mcp.tool()
+@with_progress
 async def search_chinese(
     query: str, site: str = "zhihu", max_results: int = 10,
     strategy: Literal["fallback", "merge"] = "fallback",
     response_format: Literal["text", "json"] = "text",
+    ctx: Context = None,
 ) -> str:
     """中文站点定向搜索（site: 提示并逐条校验返回链接的域名）。
 
@@ -590,17 +601,19 @@ async def search_chinese(
     domain = site_map.get(site.lower())
     if not domain:
         return _tool_error(f"不支持的 site：{site}（支持：{', '.join(site_map)}）", response_format)
-    return await web_search(query, max_results, strategy, [domain], response_format=response_format)
+    return await web_search(query, max_results, strategy, [domain], response_format=response_format, ctx=ctx)
 
 
 # ───────────────────────── tools: fetch ─────────────────────────
 
 @mcp.tool()
+@with_progress
 async def fetch_page(
     url: str, max_chars: int = 50000, start_index: int = 0,
     refresh: bool = False, response_format: Literal["text", "json"] = "text",
     expected_content_id: str = "",
     content_format: Literal["text", "markdown"] = "text",
+    ctx: Context = None,
 ) -> str:
     """提取网页正文，支持分页续读、单次刷新及 JSON 元数据。
 
@@ -617,10 +630,12 @@ async def fetch_page(
         return _tool_error("max_chars 和 start_index 必须是非负整数", response_format)
     if content_format not in {"text", "markdown"}:
         return _tool_error("content_format 必须是 text 或 markdown", response_format)
+    report(0, 1, "正在读取网页（含等待、下载与解析）")
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as c:
         res = await _fetch_one(c, url, max_chars, start_index, refresh, content_format)
     if res["ok"] and expected_content_id and res.get("content_id") != expected_content_id:
         res = {**res, "ok": False, "text": "", "error": "正文版本已变化，请从 start_index=0 重新读取"}
+    report(1, 1, "网页读取已结束：" + ("成功" if res["ok"] else "失败"))
     if response_format == "json":
         return json.dumps(res, ensure_ascii=False)
     if not res["ok"]:
@@ -631,10 +646,12 @@ async def fetch_page(
 
 
 @mcp.tool()
+@with_progress
 async def fetch_pages(urls: list[str], max_chars: int = 30000,
                       refresh: bool = False, response_format: Literal["text", "json"] = "text",
                       time_budget_seconds: float = 120,
-                      content_format: Literal["text", "markdown"] = "text") -> str:
+                      content_format: Literal["text", "markdown"] = "text",
+                      ctx: Context = None) -> str:
     """批量抓取正文；进程内最多 5 路网络抓取，共享限速与短时缓存。
 
     Args:
@@ -657,9 +674,11 @@ async def fetch_pages(urls: list[str], max_chars: int = 30000,
     except ValueError as exc:
         return _tool_error(str(exc), response_format)
 
+    unique_urls = list(dict.fromkeys(urls))
+    report(0, len(unique_urls), f"准备读取 {len(unique_urls)} 个不同网页")
+    progress = CompletionCounter(len(unique_urls), "网页读取")
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as c:
-        unique_urls = list(dict.fromkeys(urls))
-        unique_results = await budget.collect(unique_urls, lambda u: _fetch_one(c, u, max_chars, refresh=refresh, content_format=content_format),
+        unique_results = await budget.collect(unique_urls, lambda u: progress.run(_fetch_one(c, u, max_chars, refresh=refresh, content_format=content_format)),
                                              concurrency=FETCH_CONCURRENCY)
     by_url = {url: _batch_page(url, result) for url, result in zip(unique_urls, unique_results)}
     for page in by_url.values():
@@ -684,6 +703,7 @@ async def fetch_pages(urls: list[str], max_chars: int = 30000,
 # ───────────────────────── tools: deep research ─────────────────────────
 
 @mcp.tool()
+@with_progress
 async def deep_research(
     query: str,
     num_results: int = 10,
@@ -696,6 +716,7 @@ async def deep_research(
     exclude_domains: list[str] | None = None,
     time_budget_seconds: float = 120,
     content_format: Literal["text", "markdown"] = "text",
+    ctx: Context = None,
 ) -> str:
     """搜索并抓取前 N 条正文，返回资料包供调用方总结；不自动写文件。
 
@@ -725,6 +746,7 @@ async def deep_research(
     except ValueError as exc:
         return _tool_error(str(exc), response_format)
     snapshot = SearchOutcome(strategy=strategy, include_domains=include_domains or [], exclude_domains=exclude_domains or [])
+    report(0, None, "正在搜索调研来源")
     searched = await budget.collect([query], lambda q: _search(q, num_results, strategy, include_domains,
                                                               exclude_domains, snapshot=snapshot), concurrency=1)
     outcome = searched[0]
@@ -735,6 +757,10 @@ async def deep_research(
     elif isinstance(outcome, Exception):
         outcome = _failed_search(snapshot, outcome)
     items = outcome.items
+    fetch_top_n = max(0, min(fetch_top_n, len(items)))
+    if not isinstance(searched[0], Unfinished):
+        report(1, 1 + fetch_top_n, f"搜索阶段已结束：{len(items)} 条来源，计划读取 {fetch_top_n} 页" +
+               ("，存在失败诊断" if outcome.failures else ""))
     if not items:
         if response_format == "json":
             return json.dumps({
@@ -742,11 +768,11 @@ async def deep_research(
             }, ensure_ascii=False)
         return _format_search(query, outcome) + _batch_note(budget)
 
-    fetch_top_n = max(0, min(fetch_top_n, len(items)))
     top_urls = [it["url"] for it in items[:fetch_top_n]]
+    progress = CompletionCounter(len(top_urls), "网页读取", offset=1)
 
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as c:
-        fetched = await budget.collect(top_urls, lambda u: _fetch_one(c, u, 0, content_format=content_format), concurrency=FETCH_CONCURRENCY)
+        fetched = await budget.collect(top_urls, lambda u: progress.run(_fetch_one(c, u, 0, content_format=content_format)), concurrency=FETCH_CONCURRENCY)
     fetched = [_batch_page(url, result) for url, result in zip(top_urls, fetched)]
     for page in fetched:
         page["content_format"] = content_format
