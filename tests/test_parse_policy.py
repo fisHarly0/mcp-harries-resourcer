@@ -103,7 +103,7 @@ class ParserTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(policy.active)
         self.assertTrue(all(child.returncode is not None for child in children))
 
-    async def test_cancel_during_spawn_and_repeated_cancel_still_reaps_child(self):
+    async def _check_spawn_cancel(self, through_fetch=False):
         policy = self.policy()
         created, release = asyncio.Event(), asyncio.Event()
         original = asyncio.create_subprocess_exec
@@ -114,8 +114,12 @@ class ParserTests(unittest.IsolatedAsyncioTestCase):
             created.set()
             await release.wait()
             return child
+        async def fetch():
+            with patch.object(server, "PARSER", policy), patch.object(server, "NETWORK", RequestPolicy(fetch_rpm=0)):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, text="body"))) as client:
+                    return await server._fetch_one(client, "https://example.org", 10)
         with patch("parse_policy.asyncio.create_subprocess_exec", side_effect=delayed_spawn):
-            task = asyncio.create_task(policy.parse("body", "url"))
+            task = asyncio.create_task(fetch() if through_fetch else policy.parse("body", "url"))
             await asyncio.wait_for(created.wait(), 10)
             task.cancel()
             await asyncio.sleep(0)
@@ -125,6 +129,21 @@ class ParserTests(unittest.IsolatedAsyncioTestCase):
                 await task
         self.assertTrue(all(child.returncode is not None for child in children))
         self.assertFalse(policy.active)
+
+    async def test_cancel_during_spawn_and_repeated_cancel_still_reaps_child(self):
+        await self._check_spawn_cancel()
+
+    async def test_early_timeout_wrapper_cancel_still_waits_for_child(self):
+        async def early_cancel(awaitable, timeout):
+            task = asyncio.ensure_future(awaitable)
+            try:
+                return await asyncio.shield(task)
+            except asyncio.CancelledError:
+                task.cancel()
+                raise  # Simulate 3.10 wait_for escaping before child cleanup.
+        with patch("parse_policy.asyncio.wait_for", side_effect=early_cancel):
+            await self._check_spawn_cancel()
+            await self._check_spawn_cancel(through_fetch=True)
 
     async def test_crash_invalid_and_oversize_output_are_failures(self):
         for mode, code in [("crash", "parse_worker_failed"), ("invalid", "parse_worker_failed"),

@@ -73,6 +73,8 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
                 counts[self.path] = counts.get(self.path, 0) + 1
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+                if self.path != "/slow" or release.is_set():
+                    self.send_header("Content-Length", str(len(article)))
                 self.end_headers()
                 try:
                     if self.path == "/slow":

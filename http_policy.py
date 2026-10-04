@@ -1,5 +1,6 @@
 """Bounded HTTP reads, polite recovery and per-origin Retry-After cooldowns."""
 import asyncio
+from task_cleanup import wait_for_owned
 from email.utils import parsedate_to_datetime
 import math
 import time
@@ -74,7 +75,7 @@ class HTTPPolicy:
         """GET and this server's read-only search POST only; cancellation propagates."""
         started = self.clock()
         try:
-            return await asyncio.wait_for(
+            return await wait_for_owned(
                 self._request(client, method, url, headers, pace, started), self.total_timeout)
         except asyncio.TimeoutError as exc:
             raise HTTPPolicyError("deadline", "请求总时间预算已用尽") from exc

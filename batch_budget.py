@@ -2,6 +2,7 @@
 import asyncio
 from dataclasses import dataclass
 import math
+from task_cleanup import cancel_and_wait
 
 
 @dataclass(frozen=True)
@@ -70,11 +71,8 @@ class BatchBudget:
                 if any(task.cancelled() for task in tasks):
                     raise asyncio.CancelledError()
         finally:
-            for task in tasks:
-                if not task.done():
-                    task.cancel()
             if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
+                await cancel_and_wait(tasks)
 
         for index, result in enumerate(results):
             if result is missing:

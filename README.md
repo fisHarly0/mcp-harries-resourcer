@@ -185,6 +185,7 @@ mcp-harries-resourcer/
 ├── request_policy.py      # 请求限速、缓存和重复下载复用
 ├── http_policy.py         # 有界下载、重试、跳转和站点等待期
 ├── batch_budget.py        # 整批截止时间、有限工作任务和部分结果
+├── task_cleanup.py        # 超时与重复取消后的子任务回收
 ├── search_results.py      # 域名筛选、URL 去重与来源合并
 ├── page_content.py        # Markdown、代码保留、引用索引和内容提示
 ├── parse_policy.py        # 解析并发、超时、取消与子进程回收

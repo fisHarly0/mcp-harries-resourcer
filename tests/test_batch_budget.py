@@ -116,8 +116,10 @@ class BatchToolTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         patches = [
             patch.object(server, "NETWORK", RequestPolicy(fetch_rpm=0, search_rpm=0)),
+            # MockTransport never opens TLS connections. Avoid certificate-store
+            # startup consuming these deliberately short scheduling budgets.
             patch.object(server.httpx, "AsyncClient", side_effect=lambda **kw: REAL_CLIENT(
-                transport=httpx.MockTransport(lambda r: httpx.Response(200, text="fixture")), trust_env=False)),
+                transport=httpx.MockTransport(lambda r: httpx.Response(200, text="fixture")), trust_env=False, verify=False)),
         ]
         for p in patches:
             p.start()

@@ -34,6 +34,7 @@ from http_policy import HTTPPolicyError
 from batch_budget import BatchBudget, Unfinished
 from page_content import content_warnings
 from parse_policy import ParseFailure, ParsePolicy
+from task_cleanup import cancel_and_wait, wait_for_owned
 from search_results import merge_results, normalize_domains, select_results, url_identity
 
 mcp = FastMCP("resourcer")
@@ -235,7 +236,7 @@ async def _search(query: str, max_results: int, strategy: str = "fallback",
         async def attempt(name, fetch):
             failure = ""
             try:
-                res = await asyncio.wait_for(fetch(), NETWORK.http.total_timeout)
+                res = await wait_for_owned(fetch(), NETWORK.http.total_timeout)
                 selected, rejected = select_results(res, name, include, exclude)
                 return selected, {"engine": name, "status": "success", "returned": len(res),
                                   "accepted": len(selected), "filtered": rejected}, ""
@@ -271,10 +272,7 @@ async def _search(query: str, max_results: int, strategy: str = "fallback",
             try:
                 await asyncio.gather(*tasks)
             finally:
-                for task in tasks:
-                    if not task.done():
-                        task.cancel()
-                await asyncio.gather(*tasks, return_exceptions=True)
+                await cancel_and_wait(tasks)
         else:
             for index, (name, fetch) in enumerate(engines):
                 selected = await record(index, name, fetch)
@@ -383,7 +381,7 @@ async def _fetch_one(client: httpx.AsyncClient, url: str, max_chars: int,
     if content_format not in {"text", "markdown"}:
         raise ValueError("content_format 必须是 text 或 markdown")
     try:
-        result = await asyncio.wait_for(
+        result = await wait_for_owned(
             NETWORK.fetch(url, lambda: _fetch_uncached(client, url), refresh=refresh), NETWORK.http.total_timeout)
     except asyncio.TimeoutError:
         result = {"url": url, "ok": False, "error": "抓取总时间预算已用尽（含排队与等待）",

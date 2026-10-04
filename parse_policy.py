@@ -7,6 +7,7 @@ import subprocess
 import sys
 
 from request_policy import _setting
+from task_cleanup import wait_for_owned
 
 
 class ParseFailure(Exception):
@@ -31,7 +32,7 @@ class ParsePolicy:
     async def parse(self, html, url):
         started = asyncio.get_running_loop().time()
         try:
-            result = await asyncio.wait_for(self._queued(html, url), self.timeout)
+            result = await wait_for_owned(self._queued(html, url), self.timeout)
         except asyncio.TimeoutError as exc:
             raise ParseFailure("parse_deadline", "正文解析时间预算已用尽（含排队与进程启动）") from exc
         result["parse_info"] = {"mode": "subprocess", "elapsed_seconds": round(
