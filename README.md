@@ -32,6 +32,8 @@ Markdown 保留所选正文的嵌套列表层级、有序列表起始编号和�
 
 正文与 Bing／DuckDuckGo 搜索 HTML 在独立 Python 进程中解析，共用默认 2 个进程名额，每次解析预算 20 秒（含排队与启动）。超时或取消会终止并回收对应解析进程，大搜索页和复杂正文不会持续占住主事件循环；搜索解析失败可按原有策略切换引擎。进程启动和内存开销、时间边界见 [解析隔离](docs/parsing.md)。
 
+网页原始字节在解析进程中解码，优先读取 BOM、HTTP 编码声明和前 1,024 字节内的 HTML 编码声明；支持仅在页面内声明 GBK／GB2312 等编码的旧网页。JSON 正文结果带 `encoding_info`，损坏字节另有提示。规则和限制见 [网页编码](docs/encoding.md)。
+
 支持进度的 MCP 客户端可以接收搜索与读取通知：批量调用按已结束的查询／不同 URL 计数，调研先报告搜索阶段，再报告网页读取进度。成功与失败分别说明，整批到期不会把剩余项补成完成。启用方式与计数规则见 [进度反馈](docs/progress.md)。
 
 同一服务进程会复用空闲 HTTP 客户端，减少重复初始化，并在条件允许时复用连接。客户端在一次搜索／读取作用域内独占，归还时清空 Cookie；最多保留 5 个空闲客户端，60 秒未再次借出即关闭。短页测量和资源边界见 [HTTP 客户端复用](docs/clients.md)。
@@ -214,6 +216,7 @@ mcp-harries-resourcer/
 │   ├── search_content.py    # Bing／DuckDuckGo HTML 解析
 │   ├── search_results.py    # 域名筛选、URL 去重与来源合并
 │   ├── local_search.py      # 本地检索、筛选和扫描限制
+│   ├── html_encoding.py     # 网页编码声明、解码与诊断
 │   ├── page_content.py      # Markdown、代码保留与引用
 │   ├── parse_policy.py      # 搜索与正文解析进程管理
 │   └── parse_worker.py      # 单页解析进程入口

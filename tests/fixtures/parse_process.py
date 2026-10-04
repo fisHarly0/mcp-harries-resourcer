@@ -1,5 +1,6 @@
 """Controlled child process for cancellation, limits and protocol tests."""
 import json
+import base64
 import os
 from pathlib import Path
 import sys
@@ -7,6 +8,8 @@ import time
 
 mode, marker = sys.argv[1:3]
 request = json.loads(sys.stdin.buffer.read())
+if request.get("html_base64"):
+    request["html"] = base64.b64decode(request["html"]).decode("utf-8")
 if mode not in {"search_gate", "search_busy"} or request.get("engine") == "ddg":
     Path(marker).write_text(str(os.getpid()), encoding="utf-8")
 if mode == "busy" or (mode == "search_busy" and request.get("engine") == "ddg"):

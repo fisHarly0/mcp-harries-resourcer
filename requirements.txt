@@ -8,3 +8,5 @@ trafilatura>=2.3.0,<3
 # after upstream metadata normalizes the extra name to html-clean.
 lxml_html_clean>=0.4.0
 beautifulsoup4>=4.12.0
+# Web encoding labels differ from arbitrary Python codec names.
+webencodings>=0.5.1,<0.6

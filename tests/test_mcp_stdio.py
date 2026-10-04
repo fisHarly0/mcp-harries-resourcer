@@ -399,15 +399,19 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
         article = (Path(__file__).parent / "fixtures" / "technical_article.html").read_text(encoding="utf-8")
         structured_article = (Path(__file__).parent / "fixtures" / "structured_article.html").read_text(encoding="utf-8")
         merged_article = (Path(__file__).parent / "fixtures" / "merged_table_article.html").read_text(encoding="utf-8")
+        encoded_article = (Path(__file__).parent / "fixtures" / "encoded_article.html").read_text(encoding="utf-8")
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 state["requests"] += 1
                 source = structured_article if state["version"] == "structured" else article
                 if state["version"] == "tables":
                     source = merged_article
-                body = source.replace("Async worker guide", f"{state['version']} 中文资料测试").encode("utf-8")
+                encoded = state["version"] == "encoded"
+                if encoded:
+                    source = encoded_article
+                body = source.replace("Async worker guide", f"{state['version']} 中文资料测试").encode("gb18030" if encoded else "utf-8")
                 self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Type", "text/html" if encoded else "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -501,6 +505,19 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(merged["structure"]["tables"], 2)
                     self.assertTrue(tail["cached"])
                     self.assertEqual(state["requests"], 4)
+                    state["version"] = "encoded"
+                    encoded = await fetch(refresh=True, content_format="markdown", max_chars=0)
+                    self.assertEqual(encoded["title"], "中文编码资料")
+                    self.assertIn('print("中文资料读取成功")', encoded["text"])
+                    self.assertIn("中文参考文档", [r["text"] for r in encoded["references"]])
+                    self.assertEqual(encoded["encoding_info"], {"encoding": "gb18030", "source": "meta", "had_errors": False})
+                    fragment = await fetch(content_format="markdown", max_chars=57)
+                    tail = await fetch(content_format="markdown", start_index=fragment["next_index"],
+                                       expected_content_id=encoded["content_id"], max_chars=0)
+                    self.assertEqual(fragment["text"] + tail["text"], encoded["text"])
+                    self.assertTrue(tail["cached"])
+                    self.assertEqual(tail["encoding_info"], encoded["encoding_info"])
+                    self.assertEqual(state["requests"], 5)
         await asyncio.wait_for(workflow(), timeout=30)
 
     async def test_initialize_list_save_and_search(self):

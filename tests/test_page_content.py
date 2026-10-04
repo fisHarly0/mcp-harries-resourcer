@@ -175,7 +175,9 @@ class MarkdownToolTests(unittest.IsolatedAsyncioTestCase):
     async def test_markdown_failure_does_not_silently_return_plain_text(self):
         # Failure of one format is a pure extraction contract; process transport
         # and crashes are covered separately by the parser policy tests.
-        async def parse(html, url):
+        async def parse(html, url, **kwargs):
+            from mcp_harries_resourcer.html_encoding import decode_html
+            html, _ = decode_html(html, kwargs.get("content_type", ""))
             with patch.object(page_content, "extract_markdown", side_effect=ValueError("bad format")):
                 return page_content.extract_page(html, url)
         with patch.object(server.PARSER, "parse", side_effect=parse):

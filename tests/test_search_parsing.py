@@ -147,6 +147,8 @@ class SearchParsingTests(unittest.IsolatedAsyncioTestCase):
             {"ok": True, "items": [{**item, "title": None}], "error": ""},
             {"ok": False, "items": [], "error": ""},
             {"ok": False, "items": [item], "error": "failed"},
+            {"ok": True, "items": [item], "error": "", "encoding_info": {
+                "encoding": "utf-8", "source": [], "had_errors": False}},
         ):
             with self.subTest(result=result):
                 policy = self.policy("json")

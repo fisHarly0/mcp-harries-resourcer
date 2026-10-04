@@ -1,5 +1,6 @@
 """Bounded, cancellable HTML extraction in disposable Python processes."""
 import asyncio
+import base64
 import json
 import os
 from pathlib import Path
@@ -29,16 +30,19 @@ class ParsePolicy:
         return cls(concurrency=_setting("RESOURCER_PARSE_CONCURRENCY", 2, 5, 1),
                    timeout=_setting("RESOURCER_PARSE_TIMEOUT_SECONDS", 20, 120, 1))
 
-    async def parse(self, html, url):
-        return await self._parse({"html": html, "url": url})
+    async def parse(self, html, url, *, content_type=""):
+        return await self._parse({"html": html, "url": url, "content_type": content_type})
 
-    async def parse_search(self, html, engine, max_results):
+    async def parse_search(self, html, engine, max_results, *, content_type=""):
         if engine not in {"ddg", "bing"} or type(max_results) is not int or not 1 <= max_results <= 50:
             raise ValueError("invalid search parser request")
-        return await self._parse({"kind": "search", "html": html, "engine": engine, "max_results": max_results})
+        return await self._parse({"kind": "search", "html": html, "engine": engine,
+                                  "max_results": max_results, "content_type": content_type})
 
     async def _parse(self, request):
         started = asyncio.get_running_loop().time()
+        if isinstance(request["html"], bytes):
+            request = {**request, "html": base64.b64encode(request["html"]).decode("ascii"), "html_base64": True}
         try:
             result = await wait_for_owned(self._queued(request), self.timeout)
         except asyncio.TimeoutError as exc:
@@ -54,6 +58,12 @@ class ParsePolicy:
     @staticmethod
     def _valid_result(result, request):
         if not isinstance(result, dict) or type(result.get("ok")) is not bool:
+            return False
+        info = result.get("encoding_info")
+        if info is not None and (not isinstance(info, dict) or
+                not isinstance(info.get("encoding"), str) or
+                info.get("source") not in ("bom", "http", "meta", "default") or
+                type(info.get("had_errors")) is not bool):
             return False
         if request.get("kind") == "search":
             items = result.get("items")

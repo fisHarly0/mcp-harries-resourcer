@@ -97,7 +97,8 @@ async def _parse_search_response(response: httpx.Response, engine: str, max_resu
     if response.status_code in {202, 403}:
         raise SearchEngineError(f"访问受限或需要验证（HTTP {response.status_code}）")
     response.raise_for_status()
-    result = await PARSER.parse_search(response.text, engine, max_results)
+    result = await PARSER.parse_search(response.content, engine, max_results,
+                                       content_type=response.headers.get("content-type", ""))
     if not result["ok"]:
         raise SearchEngineError(result["error"])
     return result["items"]
@@ -356,6 +357,8 @@ async def _fetch_one(client: httpx.AsyncClient, url: str, max_chars: int,
         prefix = "markdown\0" if content_format == "markdown" else ""
         result["content_id"] = hashlib.sha256((prefix + result["text"]).encode("utf-8")).hexdigest()
         result["warnings"] = content_warnings(result["text"], result.get("title", ""))
+        if result.get("encoding_info", {}).get("had_errors"):
+            result["warnings"].append("decoding_errors")
         if markdown_error:
             result["warnings"].append("markdown_unavailable")
     return _slice_page(result, start_index, max_chars or None)
@@ -400,7 +403,7 @@ async def _fetch_uncached(client: httpx.AsyncClient, url: str) -> dict:
                 "request_info": r.extensions.get("resourcer", {}), "title": "", "text": ""}
 
     try:
-        parsed = await PARSER.parse(r.text, str(r.url))
+        parsed = await PARSER.parse(r.content, str(r.url), content_type=r.headers.get("content-type", ""))
     except ParseFailure as exc:
         return {"url": url, "ok": False, "error": str(exc), "error_code": exc.code,
                 "title": "", "text": "", "final_url": str(r.url),

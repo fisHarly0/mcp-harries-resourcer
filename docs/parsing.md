@@ -1,6 +1,6 @@
 # 搜索与正文解析隔离
 
-下载完成后，服务将 HTML 交给独立 Python 进程：正文生成纯文本、Markdown 和引用元数据，Bing／DuckDuckGo 搜索页生成标题、链接和摘要。每个进程只处理一页，完成即退出；缓存命中不再启动解析进程。同 URL 的并发调用仍共享一次下载和解析。
+下载完成后，服务将 HTML 原始字节与 Content-Type 交给独立 Python 进程，先按[网页编码规则](encoding.md)解码，再提取内容：正文生成纯文本、Markdown 和引用元数据，Bing／DuckDuckGo 搜索页生成标题、链接和摘要。每个进程只处理一页，完成即退出；正文缓存命中不再启动解析进程。同 URL 的并发调用仍共享一次下载和解析。
 
 这样复杂 HTML 的正文提取不会持续阻塞 MCP 主事件循环。取消正在执行的任务时，可以终止对应解析进程并等待回收；仅取消线程或执行器里的 Future 无法停止已开始的计算。进程管理依据 [Python asyncio 子进程接口](https://docs.python.org/3.10/library/asyncio-subprocess.html)和[执行器的取消语义](https://docs.python.org/3.10/library/concurrent.futures.html)，实现独立编写。
 
@@ -36,7 +36,7 @@
 
 - 每个新页面都有解释器和依赖启动开销。短页面可能比以前慢；缓存仍能避免重复解析。
 - 进程数量和传输大小有上限，但没有操作系统级内存额度，也没有 CPU 时间配额。复杂页面可占用显著内存，低内存环境可将并发设为 1。
-- 正文选择、Markdown 渲染和 Bing／DuckDuckGo 搜索 HTML 解析在子进程中；SearXNG JSON 解析、请求准备、HTML 字符解码和父子进程传输的 JSON 序列化仍在主进程。已提供 [工具级 MCP 进度](progress.md)，没有单页解析内部的完成百分比。
+- 正文选择、Markdown 渲染和 Bing／DuckDuckGo 搜索 HTML 解析在子进程中；SearXNG JSON 解析、请求准备、原始字节的 Base64 封装和父子进程传输的 JSON 序列化仍在主进程。字符解码在子进程执行，解码前仍遵守 HTTP 下载与解压后的 8 MiB 默认上限；Base64 传输会比原始字节增加约三分之一的体积。已提供 [工具级 MCP 进度](progress.md)，没有单页解析内部的完成百分比。
 - 进程创建和回收依赖操作系统，不能保证精确在截止时刻返回。这里覆盖正常超时、取消与服务清理，不承诺宿主被强杀或机器断电时的回收行为。
 - 使用同一 Python 环境和绝对脚本路径，子进程不打开窗口，不向 MCP stdout 写日志。Windows 虚拟环境采用 [CPython multiprocessing 的启动方式](https://github.com/python/cpython/blob/3.12/Lib/multiprocessing/popen_spawn_win32.py)，直接持有实际解释器的进程句柄。
 

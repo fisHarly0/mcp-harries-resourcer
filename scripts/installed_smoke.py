@@ -19,11 +19,12 @@ from mcp.client.stdio import stdio_client
 
 
 async def smoke(command):
-    body = (Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "technical_article.html").read_bytes()
+    source = (Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "technical_article.html").read_text(encoding="utf-8")
+    body = source.replace('charset="utf-8"', 'charset="gb18030"').encode("gb18030")
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Type", "text/html")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -59,6 +60,8 @@ async def smoke(command):
                     assert page["ok"], page
                     assert page["parse_info"]["mode"] == "subprocess", page
                     assert "```python" in page["text"], page
+                    assert '\"甲\", \"乙\"' in page["text"], page
+                    assert page["encoding_info"] == {"encoding": "gb18030", "source": "meta", "had_errors": False}, page
                     assert page["structure"]["tables"] == 1, page
                     await call("save_finding", {"collection": "installed", "title": "Wheel note",
                                                "content": "Installed workflow verified", "source_url": url, "tags": "package,MCP"})
@@ -67,7 +70,7 @@ async def smoke(command):
                     assert found["complete"] and len(found["matches"]) == 1, found
                     assert found["matches"][0]["metadata"]["collection"] == "installed", found
             return {"version": version.stdout.strip(), "tools": len(names), "foreign_cwd": True,
-                    "parse_subprocess": True, "markdown_code_and_table": True, "save_and_search": True}
+                    "parse_subprocess": True, "declared_encoding": True, "markdown_code_and_table": True, "save_and_search": True}
     finally:
         http.shutdown()
         http.server_close()
