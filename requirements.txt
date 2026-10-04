@@ -4,4 +4,7 @@ mcp>=1.30.0,<2
 httpx>=0.27.0
 # Markdown rendering uses the documented v2 XML renderer and code/table handling.
 trafilatura>=2.3.0,<3
+# Explicit dependency: older pip may miss jusText's lxml[html_clean] extra
+# after upstream metadata normalizes the extra name to html-clean.
+lxml_html_clean>=0.4.0
 beautifulsoup4>=4.12.0

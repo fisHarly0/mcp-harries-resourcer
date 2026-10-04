@@ -84,3 +84,7 @@ Windows 可通过 `TEMP`、`TMP` 指定临时盘，`PIP_CACHE_DIR`、`UV_CACHE_D
 包配置遵循 [Python 打包指南](https://packaging.python.org/en/latest/guides/writing-pyproject-toml/)，依赖声明从 `requirements.txt` 读取，源码与安装包共用一份范围。命令入口形式参考 [DuckDuckGo MCP Server](https://github.com/nickclyde/duckduckgo-mcp-server/blob/main/pyproject.toml) 的工具分发方式；本项目独立实现安装与验证流程。
 
 本批本地验证：Windows / Python 3.12.12，原有 193 项测试中 192 项通过、1 项因符号链接权限不足跳过。源码包 → wheel → 全新虚拟环境、命令入口、模块入口、uv 临时来源启动和旧版脚本入口均已完成上述真实 MCP 流程。缓存与验证环境位于 F 盘。四组跨平台结果以 [Actions](https://github.com/fisHarly0/mcp-harries-resourcer/actions/workflows/tests.yml) 中对应提交为准。
+
+首轮安装 CI 发现 Python 3.10 新虚拟环境未装入 `lxml_html_clean`：旧 pip 对上游 `html_clean`／`html-clean` extra 的处理导致漏装，`pip check` 仍报告正常，真实 MCP 初始化才暴露错误。0.1.1 将该模块显式加入依赖；CI 各组合独立完成，避免一组失败取消其他组的安装验证。
+
+修正后，本地另用 Python 3.10.20 新建虚拟环境（自带 pip 23.0.1），完成 0.1.1 的源码包构建、wheel 安装、命令与模块入口的真实 MCP 流程。独立安装清理模块也是 [上游提供的安装方式](https://lxml-html-clean.readthedocs.io/en/latest/#installation)。
