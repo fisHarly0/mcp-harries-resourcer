@@ -15,6 +15,66 @@ from mcp.client.stdio import stdio_client
 
 
 class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
+    async def test_batch_partial_results_and_retry_over_mcp(self):
+        counts = {}
+        release = threading.Event()
+        article = ("<html><title>Batch fixture</title><article><h1>Batch fixture</h1><p>" +
+                   "Completed content should remain readable when another page is too slow. " * 12 +
+                   "</p></article></html>").encode()
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                counts[self.path] = counts.get(self.path, 0) + 1
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                try:
+                    if self.path == "/slow":
+                        while not release.wait(0.1):
+                            self.wfile.write(b"waiting ")
+                            self.wfile.flush()
+                    self.wfile.write(article)
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    pass
+
+            def log_message(self, *args):
+                pass
+
+        http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=http.serve_forever, daemon=True).start()
+        self.addCleanup(http.server_close)
+        self.addCleanup(http.shutdown)
+        self.addCleanup(release.set)
+        base = f"http://127.0.0.1:{http.server_port}"
+        params = StdioServerParameters(command=sys.executable,
+            args=[str(Path(__file__).resolve().parents[1] / "server.py")],
+            env={**os.environ, "RESOURCER_FETCH_RPM": "0", "RESOURCER_REQUEST_TIMEOUT_SECONDS": "30"})
+
+        async def workflow():
+            async with stdio_client(params) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    async def call(name, **arguments):
+                        result = await session.call_tool(name, {"response_format": "json", **arguments})
+                        self.assertFalse(result.isError)
+                        return json.loads("\n".join(c.text for c in result.content if c.type == "text"))
+                    first = await call("fetch_page", url=base + "/fast")
+                    self.assertTrue(first["ok"])
+                    data = await call("fetch_pages", urls=[base + "/fast", base + "/slow", base + "/fast"], time_budget_seconds=1)
+                    self.assertEqual(data["successful"], 2)
+                    self.assertEqual(data["pages"][0]["text"], first["text"])
+                    self.assertEqual(data["pages"][1]["error_code"], "batch_deadline")
+                    self.assertEqual(data["unfinished_urls"], [base + "/slow"])
+                    self.assertTrue(data["batch"]["deadline_exceeded"])
+                    self.assertEqual(counts["/fast"], 1)
+                    self.assertEqual(counts["/slow"], 1)
+                    release.set()
+                    retried = await call("fetch_page", url=base + "/slow")
+                    self.assertTrue(retried["ok"], retried)
+                    self.assertFalse(retried["cached"])
+                    self.assertEqual(counts["/slow"], 2)
+        await asyncio.wait_for(workflow(), 30)
+
     async def test_network_recovery_and_limits_over_mcp(self):
         counts = {}
         stop = threading.Event()
@@ -127,6 +187,17 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
                     research = await call("deep_research", query="python", include_domains=["python.org"], fetch_top_n=0)
                     self.assertEqual(research["search_status"], "results")
                     self.assertEqual(research["pages"], [])
+                    partial = await call("web_search_multi", queries=["budget"], strategy="merge",
+                                         include_domains=["python.org"], time_budget_seconds=0.2)
+                    self.assertEqual(len(partial["results"]), 1)
+                    self.assertFalse(partial["complete"])
+                    self.assertTrue(partial["batch"]["deadline_exceeded"])
+                    self.assertEqual(partial["queries"][0]["attempts"][1]["status"], "deadline")
+                    partial_research = await call("deep_research", query="budget", strategy="merge",
+                                                  include_domains=["python.org"], time_budget_seconds=0.2)
+                    self.assertEqual(len(partial_research["results"]), 1)
+                    self.assertFalse(partial_research["pages"][0]["started"])
+                    self.assertEqual(partial_research["pages"][0]["error_code"], "batch_deadline")
         await asyncio.wait_for(workflow(), timeout=30)
 
     async def test_paginated_json_and_refresh_over_mcp(self):

@@ -32,6 +32,7 @@ from mcp.server.fastmcp import FastMCP
 
 from request_policy import RequestPolicy
 from http_policy import HTTPPolicyError
+from batch_budget import BatchBudget, Unfinished
 from search_results import merge_results, normalize_domains, select_results, url_identity
 
 mcp = FastMCP("resourcer")
@@ -131,6 +132,7 @@ class SearchOutcome:
     strategy: str = "fallback"
     include_domains: list[str] = field(default_factory=list)
     exclude_domains: list[str] = field(default_factory=list)
+    deadline_exceeded: bool = False
 
     @property
     def status(self) -> str:
@@ -193,13 +195,15 @@ async def _bing(client: httpx.AsyncClient, query: str, max_results: int, mkt: st
 
 async def _search(query: str, max_results: int, strategy: str = "fallback",
                   include_domains: list[str] | None = None,
-                  exclude_domains: list[str] | None = None) -> SearchOutcome:
+                  exclude_domains: list[str] | None = None,
+                  snapshot: SearchOutcome | None = None) -> SearchOutcome:
     """Route by language, enforce domains locally, optionally merge engines."""
     if strategy not in {"fallback", "merge"}:
         raise ValueError("strategy 必须是 fallback 或 merge")
     include = normalize_domains(include_domains)
     exclude = normalize_domains(exclude_domains)
-    outcome = SearchOutcome(strategy=strategy, include_domains=include, exclude_domains=exclude)
+    outcome = snapshot if snapshot is not None else SearchOutcome()
+    outcome.strategy, outcome.include_domains, outcome.exclude_domains = strategy, include, exclude
     if not query.strip():
         outcome.failures.append("关键词不能为空")
         return outcome
@@ -245,22 +249,34 @@ async def _search(query: str, max_results: int, strategy: str = "fallback",
                 failure = str(exc)
             return [], {"engine": name, "status": "failed", "error": failure}, f"{name}：{failure}"
 
-        def record(result):
-            items, metadata, failure = result
-            outcome.attempts.append(metadata)
-            outcome.filtered_count += metadata.get("filtered", 0)
-            if failure:
-                outcome.failures.append(failure)
+        groups = [[] for _ in engines]
+        failures = ["" for _ in engines]
+        attempts = [None for _ in engines]
+
+        async def record(index, name, fetch):
+            attempts[index] = {"engine": name, "status": "running"}
+            outcome.attempts = [entry for entry in attempts if entry is not None]
+            items, metadata, failure = await attempt(name, fetch)
+            groups[index], attempts[index], failures[index] = items, metadata, failure
+            outcome.attempts = [entry for entry in attempts if entry is not None]
+            outcome.filtered_count = sum(entry.get("filtered", 0) for entry in outcome.attempts)
+            outcome.failures = [error for error in failures if error]
+            outcome.items = merge_results(groups, max_results)
             return items
 
         if strategy == "merge":
-            results = await asyncio.gather(*(attempt(name, fetch) for name, fetch in engines))
-            outcome.items = merge_results([record(result) for result in results], max_results)
+            tasks = [asyncio.create_task(record(index, name, fetch)) for index, (name, fetch) in enumerate(engines)]
+            try:
+                await asyncio.gather(*tasks)
+            finally:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
         else:
-            for name, fetch in engines:
-                selected = record(await attempt(name, fetch))
+            for index, (name, fetch) in enumerate(engines):
+                selected = await record(index, name, fetch)
                 if selected:
-                    outcome.items = merge_results([selected], max_results)
                     break
     return outcome
 
@@ -290,7 +306,45 @@ def _search_payload(query: str, outcome: SearchOutcome) -> dict:
         "include_domains": outcome.include_domains, "exclude_domains": outcome.exclude_domains,
         "results": outcome.items, "diagnostics": outcome.failures,
         "attempts": outcome.attempts, "filtered_count": outcome.filtered_count,
+        "deadline_exceeded": outcome.deadline_exceeded,
     }
+
+
+def _unfinished_search(outcome: SearchOutcome, unfinished: Unfinished) -> SearchOutcome:
+    outcome.deadline_exceeded = True
+    message = "整批时间预算已用尽，搜索已中止" if unfinished.started else "整批时间预算已用尽，搜索尚未开始"
+    outcome.failures.append(message)
+    for attempt in outcome.attempts:
+        if attempt["status"] == "running":
+            attempt.update(status="deadline", error=message)
+    return outcome
+
+
+def _failed_search(outcome: SearchOutcome, error: Exception) -> SearchOutcome:
+    message = f"查询失败：{type(error).__name__}"
+    outcome.failures.append(message)
+    for attempt in outcome.attempts:
+        if attempt["status"] == "running":
+            attempt.update(status="failed", error=message)
+    return outcome
+
+
+def _batch_page(url: str, result) -> dict:
+    if isinstance(result, Unfinished):
+        return {"url": url, "ok": False, "title": "", "text": "", "error_code": "batch_deadline",
+                "started": result.started, "error": "整批时间预算已用尽，" + ("抓取已中止" if result.started else "抓取尚未开始")}
+    if isinstance(result, Exception):
+        return {"url": url, "ok": False, "title": "", "text": "", "error_code": "fetch_error",
+                "error": f"抓取异常：{type(result).__name__}"}
+    return result
+
+
+def _batch_note(budget: BatchBudget) -> str:
+    info = budget.metadata()
+    if info["complete"] and not info["deadline_exceeded"]:
+        return ""
+    return (f"\n_整批时间预算 {info['time_budget_seconds']} 秒已用尽；保留已完成结果，"
+            f"{info['timed_out']} 项已中止，{info['not_started']} 项尚未开始。_\n")
 
 
 def _format_results(query: str, items: list[dict]) -> str:
@@ -430,6 +484,7 @@ async def web_search_multi(
     strategy: Literal["fallback", "merge"] = "fallback",
     include_domains: list[str] | None = None, exclude_domains: list[str] | None = None,
     response_format: Literal["text", "json"] = "text",
+    time_budget_seconds: float = 120,
 ) -> str:
     """并发搜索多个 query，结果按 query 分组并去重。
 
@@ -440,11 +495,13 @@ async def web_search_multi(
         include_domains: 仅保留指定裸域名及其子域名
         exclude_domains: 排除指定裸域名及其子域名
         response_format: text 或 json；JSON 的 queries 保留每个查询关联的结果 URL
+        time_budget_seconds: 整批搜索时间预算，默认 120 秒；大于 0 且不超过 600，到时返回部分结果
     """
     per_query = max(1, min(int(per_query), 30))
     if not queries:
         return _tool_error("queries 不能为空", response_format)
     try:
+        budget = BatchBudget(time_budget_seconds)
         include_domains = normalize_domains(include_domains)
         exclude_domains = normalize_domains(exclude_domains)
         if strategy not in {"fallback", "merge"}:
@@ -452,19 +509,25 @@ async def web_search_multi(
     except ValueError as exc:
         return _tool_error(str(exc), response_format)
 
-    results = await asyncio.gather(*[
-        _search(q, per_query, strategy, include_domains, exclude_domains) for q in queries
-    ], return_exceptions=True)
+    snapshots = [SearchOutcome(strategy=strategy, include_domains=include_domains,
+                               exclude_domains=exclude_domains) for _ in queries]
+
+    async def search_index(index):
+        return await _search(queries[index], per_query, strategy, include_domains, exclude_domains,
+                             snapshot=snapshots[index])
+
+    results = await budget.collect(list(range(len(queries))), search_index)
 
     seen_urls = set()
     blocks = []
     query_payloads = []
     all_groups = []
     total = 0
-    for q, res in zip(queries, results):
+    for index, (q, res) in enumerate(zip(queries, results)):
+        if isinstance(res, Unfinished):
+            res = _unfinished_search(snapshots[index], res)
         if isinstance(res, Exception):
-            res = SearchOutcome(failures=[f"查询失败：{type(res).__name__}"], strategy=strategy,
-                                include_domains=include_domains, exclude_domains=exclude_domains)
+            res = _failed_search(snapshots[index], res)
         payload = _search_payload(q, res)
         payload.pop("results")
         payload["result_urls"] = [it.get("canonical_url") or url_identity(it["url"])[0] for it in res.items]
@@ -493,9 +556,9 @@ async def web_search_multi(
             ))
         return json.dumps({"ok": all(p["ok"] for p in query_payloads),
                            "complete": all(p["complete"] for p in query_payloads),
-                           "results": combined, "queries": query_payloads}, ensure_ascii=False)
+                           "results": combined, "queries": query_payloads, "batch": budget.metadata()}, ensure_ascii=False)
     header = f"# 多查询搜索（{len(queries)} 个 query，去重后 {total} 条）\n"
-    return header + "\n\n---\n\n".join(blocks)
+    return header + _batch_note(budget) + "\n\n---\n\n".join(blocks)
 
 
 @mcp.tool()
@@ -559,7 +622,8 @@ async def fetch_page(
 
 @mcp.tool()
 async def fetch_pages(urls: list[str], max_chars: int = 30000,
-                      refresh: bool = False, response_format: Literal["text", "json"] = "text") -> str:
+                      refresh: bool = False, response_format: Literal["text", "json"] = "text",
+                      time_budget_seconds: float = 120) -> str:
     """批量抓取正文；进程内最多 5 路网络抓取，共享限速与短时缓存。
 
     Args:
@@ -567,28 +631,31 @@ async def fetch_pages(urls: list[str], max_chars: int = 30000,
         max_chars: 每篇最长字符数；0 = 不截断
         refresh: 跳过已完成缓存
         response_format: text 或 json；JSON 中每页的 next_index 可传给 fetch_page 续读
+        time_budget_seconds: 整批抓取时间预算，含分批排队；默认 120 秒，大于 0 且不超过 600
     """
     if not urls:
         return _tool_error("urls 不能为空", response_format)
     if max_chars < 0:
         return _tool_error("max_chars 必须是非负整数", response_format)
 
-    sem = asyncio.Semaphore(FETCH_CONCURRENCY)
-
-    async def _bound_fetch(client, u):
-        async with sem:
-            return await _fetch_one(client, u, max_chars, refresh=refresh)
+    try:
+        budget = BatchBudget(time_budget_seconds)
+    except ValueError as exc:
+        return _tool_error(str(exc), response_format)
 
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as c:
         unique_urls = list(dict.fromkeys(urls))
-        unique_results = await asyncio.gather(*[_bound_fetch(c, u) for u in unique_urls])
-    by_url = dict(zip(unique_urls, unique_results))
+        unique_results = await budget.collect(unique_urls, lambda u: _fetch_one(c, u, max_chars, refresh=refresh),
+                                             concurrency=FETCH_CONCURRENCY)
+    by_url = {url: _batch_page(url, result) for url, result in zip(unique_urls, unique_results)}
     results = [dict(by_url[url]) for url in urls]
 
     ok = sum(1 for r in results if r["ok"])
     if response_format == "json":
-        return json.dumps({"ok": ok == len(results), "successful": ok, "requested": len(urls), "pages": results}, ensure_ascii=False)
-    blocks = [f"# 批量抓取（{ok}/{len(urls)} 成功）"]
+        return json.dumps({"ok": ok == len(results), "successful": ok, "requested": len(urls), "pages": results,
+                           "batch": budget.metadata(),
+                           "unfinished_urls": [u for u in unique_urls if by_url[u].get("error_code") == "batch_deadline"]}, ensure_ascii=False)
+    blocks = [f"# 批量抓取（{ok}/{len(urls)} 成功）", _batch_note(budget)]
     for r in results:
         if not r["ok"]:
             blocks.append(f"\n---\n## ❌ {r['url']}\n{r['error']}")
@@ -611,6 +678,7 @@ async def deep_research(
     strategy: Literal["fallback", "merge"] = "fallback",
     include_domains: list[str] | None = None,
     exclude_domains: list[str] | None = None,
+    time_budget_seconds: float = 120,
 ) -> str:
     """搜索并抓取前 N 条正文，返回资料包供调用方总结；不自动写文件。
 
@@ -624,32 +692,42 @@ async def deep_research(
         strategy: fallback 或 merge
         include_domains: 搜索结果仅保留指定裸域名及其子域名（不限制正文请求的 HTTP 跳转）
         exclude_domains: 搜索结果排除指定裸域名及其子域名
+        time_budget_seconds: 搜索与正文抓取共用的整批时间预算，默认 120 秒；大于 0 且不超过 600
     """
     if min(max_chars_each, max_total_chars) < 0:
         return _tool_error("max_chars_each 和 max_total_chars 必须是非负整数", response_format)
     try:
-        outcome = await _search(query, num_results, strategy, include_domains, exclude_domains)
+        budget = BatchBudget(time_budget_seconds)
+        include_domains = normalize_domains(include_domains)
+        exclude_domains = normalize_domains(exclude_domains)
+        if strategy not in {"fallback", "merge"}:
+            raise ValueError("strategy 必须是 fallback 或 merge")
     except ValueError as exc:
         return _tool_error(str(exc), response_format)
+    snapshot = SearchOutcome(strategy=strategy, include_domains=include_domains or [], exclude_domains=exclude_domains or [])
+    searched = await budget.collect([query], lambda q: _search(q, num_results, strategy, include_domains,
+                                                              exclude_domains, snapshot=snapshot), concurrency=1)
+    outcome = searched[0]
+    if isinstance(outcome, Unfinished):
+        outcome = _unfinished_search(snapshot, outcome)
+    elif isinstance(outcome, ValueError):
+        return _tool_error(str(outcome), response_format)
+    elif isinstance(outcome, Exception):
+        outcome = _failed_search(snapshot, outcome)
     items = outcome.items
     if not items:
         if response_format == "json":
             return json.dumps({
-                **_search_payload(query, outcome), "pages": [],
+                **_search_payload(query, outcome), "pages": [], "batch": budget.metadata(), "unfinished_urls": [],
             }, ensure_ascii=False)
-        return _format_search(query, outcome)
+        return _format_search(query, outcome) + _batch_note(budget)
 
     fetch_top_n = max(0, min(fetch_top_n, len(items)))
     top_urls = [it["url"] for it in items[:fetch_top_n]]
 
-    sem = asyncio.Semaphore(FETCH_CONCURRENCY)
-
-    async def _bound_fetch(client, u):
-        async with sem:
-            return await _fetch_one(client, u, 0)
-
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as c:
-        fetched = await asyncio.gather(*[_bound_fetch(c, u) for u in top_urls])
+        fetched = await budget.collect(top_urls, lambda u: _fetch_one(c, u, 0), concurrency=FETCH_CONCURRENCY)
+    fetched = [_batch_page(url, result) for url, result in zip(top_urls, fetched)]
 
     remaining = max_total_chars if max_total_chars else None
     bounded = []
@@ -672,9 +750,12 @@ async def deep_research(
             "ok": ok_count == fetch_top_n, "pages": fetched,
             "requested_pages": fetch_top_n, "successful_pages": ok_count,
             "returned_body_chars": returned_chars, "max_total_chars": max_total_chars,
+            "batch": budget.metadata(),
+            "unfinished_urls": [f["url"] for f in fetched if f.get("error_code") == "batch_deadline"],
         }, ensure_ascii=False)
-    out = [f"# 深度调研：{query}", f"_共 {len(items)} 条搜索结果，尝试抓取 {fetch_top_n} 篇，成功 {ok_count} 篇_\n"]
+    out = [f"# 深度调研：{query}", f"_共 {len(items)} 条搜索结果，计划抓取 {fetch_top_n} 篇，成功 {ok_count} 篇_\n"]
     out.append(f"_本次返回正文 {returned_chars} 字符；总预算：{max_total_chars or '不限'}。_\n")
+    out.append(_batch_note(budget))
     if outcome.failures or outcome.filtered_count:
         out.append(_search_notes(outcome))
     out.append("## 📋 结果索引\n")

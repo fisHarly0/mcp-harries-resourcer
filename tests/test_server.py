@@ -221,7 +221,7 @@ class ResearchTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(server, "_fetch_one", AsyncMock()) as fetch:
                 text = await server.deep_research("example", fetch_top_n=0)
         fetch.assert_not_called()
-        self.assertIn("尝试抓取 0 篇", text)
+        self.assertIn("计划抓取 0 篇", text)
 
     async def test_batch_fetch_limits_concurrency_and_keeps_errors(self):
         active = peak = 0

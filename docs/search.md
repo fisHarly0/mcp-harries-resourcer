@@ -73,6 +73,8 @@ URL 去重统一主机名大小写、国际化域名、默认端口、空路径�
 
 多查询 JSON 的顶层 `results` 只保留去重后的结果。每条结果的 `queries` 列出命中的查询，`provenance` 另带 `query`；顶层 `queries` 则逐条保存状态、诊断和 `result_urls`（规范化 URL）。这样重复结果不会被误报成“该查询没有结果”。顶层 `ok` / `complete` 分别是各查询对应字段的汇总。
 
+多查询和调研新增默认 120 秒的 `time_budget_seconds`，到时会保留已经返回的引擎结果，未完成查询以诊断说明。单查询状态新增 `deadline_exceeded`，用于区分整批超时；已启动但未结束的引擎在 `attempts` 中标为 `deadline`。有部分链接时 `search_status` 仍为 `results`，同时 `complete=false`。详见 [整批预算](batches.md)。
+
 `deep_research` 接受相同的 `strategy`、`include_domains`、`exclude_domains`，只抓取筛选后的前 N 条。JSON 增加上述搜索字段，原有正文与预算字段保持不变；其中 `ok` 继续表示所请求正文是否全部获取成功，`complete` 只描述搜索阶段。
 
 ## 本批验证

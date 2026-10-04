@@ -26,7 +26,7 @@
 
 ```text
 # 深度调研：Python asyncio official documentation
-_共 5 条搜索结果，尝试抓取 2 篇，成功 1 篇_
+_共 5 条搜索结果，计划抓取 2 篇，成功 1 篇_
 
 ## 结果索引
 ✅ 1. [asyncio documentation](https://docs.python.org/3/library/asyncio.html)

@@ -135,7 +135,7 @@ class SearchControlTests(unittest.IsolatedAsyncioTestCase):
         client.assert_not_called()
 
     async def test_multi_dedup_keeps_query_membership_and_rank_provenance(self):
-        async def search(q, *args):
+        async def search(q, *args, **kwargs):
             items, _ = select_results([item("https://example.org/a#" + q)], "DDG", [], [])
             return server.SearchOutcome(items)
         with patch.object(server, "_search", side_effect=search):
