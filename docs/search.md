@@ -77,7 +77,7 @@ URL 去重统一主机名大小写、国际化域名、默认端口、空路径�
 
 `deep_research` 接受相同的 `strategy`、`include_domains`、`exclude_domains`，只抓取筛选后的前 N 条。JSON 增加上述搜索字段，原有正文与预算字段保持不变；其中 `ok` 继续表示所请求正文是否全部获取成功，`complete` 只描述搜索阶段。
 
-## 本批验证
+## 早期验证记录
 
 2026-10-04，本地 85 项离线测试通过，包含真实 MCP 子进程中的参数发现、域名校验、合并、JSON、多查询和调研流程。引擎 HTTP 响应在离线测试中使用固定样本；另用 `scripts/search_smoke.py` 通过真实 MCP 子进程访问引擎，固定 `max_results=5`、`include_domains=["docs.python.org"]`：
 
@@ -89,6 +89,8 @@ URL 去重统一主机名大小写、国际化域名、默认端口、空路径�
 | Python asyncio 官方文档 | merge | 0 条，`incomplete` | Bing 的 10 条候选均被过滤，DuckDuckGo HTTP 202，约 3.59 秒 |
 
 返回来源包括 [asyncio 文档](https://docs.python.org/3/library/asyncio.html)、[概念概述](https://docs.python.org/3/howto/a-conceptual-overview-of-asyncio.html)、[任务与协程](https://docs.python.org/3/library/asyncio-task.html)。这组小样本证明了本次来源筛选和错误保留的效果，不能证明合并模式普遍提高相关性或响应速度。中文检索的覆盖率仍需改进，额外后端留在后续路线中。
+
+后续扩展为 6 个中英文案例，并将域名正确与具体参考页命中分开记录。当前脚本参数与实测见 [搜索质量验证](search-quality.md)；以上是早期单查询工具的样本，不能和后来采用整批预算的报告直接比较耗时。
 
 ## 设计参考
 

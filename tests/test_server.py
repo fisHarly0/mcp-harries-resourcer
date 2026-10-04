@@ -39,7 +39,23 @@ class ParserTests(unittest.TestCase):
         items = server._parse_bing(fixture("bing_results.html"), 10)
         self.assertEqual(len(items), 2)
         self.assertEqual(items[0]["url"], "https://example.org/guide")
-        self.assertEqual(items[0]["snippet"], "Readable snippet .")
+        self.assertEqual(items[0]["snippet"], "Readable snippet.")
+
+    def test_inline_search_highlights_preserve_word_boundaries(self):
+        for parser, template in (
+            (server._parse_bing, '<li class="b_algo"><h2><a href="https://example.org">{title}</a></h2><p>{snippet}</p></li>'),
+            (server._parse_ddg, '<div class="result"><a class="result__a" href="https://example.org">{title}</a><div class="result__snippet">{snippet}</div></div>'),
+        ):
+            for title, expected in (
+                ('<b>Python</b> 3.14 <b>documentation</b>', 'Python 3.14 documentation'),
+                ('<b>use</b>Effect', 'useEffect'),
+                ('<b>异步</b>编程', '异步编程'),
+                ('first<br>second', 'first second'),
+            ):
+                with self.subTest(parser=parser.__name__, title=title):
+                    result = parser(template.format(title=title, snippet='Read <b>this</b>.'), 1)[0]
+                    self.assertEqual(result['title'], expected)
+                    self.assertEqual(result['snippet'], 'Read this.')
 
     def test_result_limit(self):
         for engine in ("ddg", "bing"):

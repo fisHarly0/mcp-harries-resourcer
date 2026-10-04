@@ -45,7 +45,8 @@ def main():
             assert all(name.startswith(("mcp_harries_resourcer/", "mcp_harries_resourcer-")) for name in names), names
         with tarfile.open(sdist) as archive:
             names = archive.getnames()
-            for expected in ("requirements.txt", "LICENSE", "server.py", "mcp_harries_resourcer/parse_worker.py"):
+            for expected in ("requirements.txt", "LICENSE", "server.py", "mcp_harries_resourcer/parse_worker.py",
+                             "scripts/search_cases.json", "docs/evidence/search-reference-2026-10-04.json"):
                 assert any(name.endswith("/" + expected) for name in names), expected
         environment = root / "venv"
         venv.EnvBuilder(with_pip=True).create(environment)

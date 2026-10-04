@@ -1,0 +1,1295 @@
+{
+  "schema_version": 2,
+  "run_complete": true,
+  "repo_commit": "ff753de5ce1c1f9bf6d1bc70521058264e22f530",
+  "source_sha256": "228235fc83ca8be80e6d328b9de67fc5e5ac1fc196c7fb8dd2d87b3ee32d1755",
+  "cases": [
+    {
+      "id": "asyncio-en",
+      "language": "en",
+      "query": "Python asyncio official documentation",
+      "include_domains": [
+        "docs.python.org"
+      ],
+      "reference_urls": [
+        "https://docs.python.org/3/library/asyncio.html",
+        "https://docs.python.org/zh-cn/3/library/asyncio.html"
+      ]
+    },
+    {
+      "id": "asyncio-zh",
+      "language": "zh",
+      "query": "Python asyncio 官方文档",
+      "include_domains": [
+        "docs.python.org"
+      ],
+      "reference_urls": [
+        "https://docs.python.org/3/library/asyncio.html",
+        "https://docs.python.org/zh-cn/3/library/asyncio.html"
+      ]
+    },
+    {
+      "id": "react-effect-en",
+      "language": "en",
+      "query": "React useEffect official documentation",
+      "include_domains": [
+        "react.dev"
+      ],
+      "reference_urls": [
+        "https://react.dev/reference/react/useEffect",
+        "https://zh-hans.react.dev/reference/react/useEffect"
+      ]
+    },
+    {
+      "id": "react-effect-zh",
+      "language": "zh",
+      "query": "React useEffect 官方文档",
+      "include_domains": [
+        "react.dev"
+      ],
+      "reference_urls": [
+        "https://react.dev/reference/react/useEffect",
+        "https://zh-hans.react.dev/reference/react/useEffect"
+      ]
+    },
+    {
+      "id": "fastapi-dependencies-en",
+      "language": "en",
+      "query": "FastAPI dependency injection official documentation",
+      "include_domains": [
+        "fastapi.tiangolo.com"
+      ],
+      "reference_urls": [
+        "https://fastapi.tiangolo.com/tutorial/dependencies/",
+        "https://fastapi.tiangolo.com/zh/tutorial/dependencies/"
+      ]
+    },
+    {
+      "id": "fastapi-dependencies-zh",
+      "language": "zh",
+      "query": "FastAPI 依赖注入 官方文档",
+      "include_domains": [
+        "fastapi.tiangolo.com"
+      ],
+      "reference_urls": [
+        "https://fastapi.tiangolo.com/tutorial/dependencies/",
+        "https://fastapi.tiangolo.com/zh/tutorial/dependencies/"
+      ]
+    }
+  ],
+  "planned_runs": 12,
+  "settings": {
+    "strategies": [
+      "fallback",
+      "merge"
+    ],
+    "repeats": 1,
+    "per_query": 5,
+    "time_budget_seconds": 30,
+    "tool": "web_search_multi",
+    "queries_per_call": 1
+  },
+  "records": [
+    {
+      "ok": true,
+      "query": "Python asyncio official documentation",
+      "search_status": "results",
+      "complete": false,
+      "strategy": "fallback",
+      "include_domains": [
+        "docs.python.org"
+      ],
+      "exclude_domains": [],
+      "diagnostics": [
+        "DuckDuckGo：访问受限或需要验证（HTTP 202）"
+      ],
+      "attempts": [
+        {
+          "engine": "DuckDuckGo",
+          "status": "failed",
+          "error": "访问受限或需要验证（HTTP 202）"
+        },
+        {
+          "engine": "Bing/en-US",
+          "status": "success",
+          "returned": 10,
+          "accepted": 10,
+          "filtered": 0
+        }
+      ],
+      "filtered_count": 0,
+      "deadline_exceeded": false,
+      "result_urls": [
+        "https://docs.python.org/3/library/asyncio.html",
+        "https://docs.python.org/3/howto/a-conceptual-overview-of-asyncio.html",
+        "https://docs.python.org/3/library/asyncio-dev.html",
+        "https://docs.python.org/3/library/asyncio-task.html",
+        "https://docs.python.org/3/library/asyncio-threading.html"
+      ],
+      "case_id": "asyncio-en",
+      "language": "en",
+      "repeat": 1,
+      "elapsed_seconds": 5.547,
+      "results": [
+        {
+          "url": "https://docs.python.org/3/library/asyncio.html",
+          "title": "asyncio — Asynchronous I/O — Python 3.14.8 documentation",
+          "source": "bing",
+          "canonical_url": "https://docs.python.org/3/library/asyncio.html",
+          "provenance": [
+            {
+              "engine": "Bing/en-US",
+              "rank": 1,
+              "url": "https://docs.python.org/3/library/asyncio.html",
+              "query": "Python asyncio official documentation"
+            }
+          ],
+          "queries": [
+            "Python asyncio official documentation"
+          ]
+        },
+        {
+          "url": "https://docs.python.org/3/howto/a-conceptual-overview-of-asyncio.html",
+          "title": "A Conceptual Overview of asyncio — Python 3.14.8 documentation",
+          "source": "bing",
+          "canonical_url": "https://docs.python.org/3/howto/a-conceptual-overview-of-asyncio.html",
+          "provenance": [
+            {
+              "engine": "Bing/en-US",
+              "rank": 2,
+              "url": "https://docs.python.org/3/howto/a-conceptual-overview-of-asyncio.html",
+              "query": "Python asyncio official documentation"
+            }
+          ],
+          "queries": [
+            "Python asyncio official documentation"
+          ]
+        },
+        {
+          "url": "https://docs.python.org/3/library/asyncio-dev.html",
+          "title": "Developing with asyncio — Python 3.14.8 documentation",
+          "source": "bing",
+          "canonical_url": "https://docs.python.org/3/library/asyncio-dev.html",
+          "provenance": [
+            {
+              "engine": "Bing/en-US",
+              "rank": 3,
+              "url": "https://docs.python.org/3/library/asyncio-dev.html",
+              "query": "Python asyncio official documentation"
+            }
+          ],
+          "queries": [
+            "Python asyncio official documentation"
+          ]
+        },
+        {
+          "url": "https://docs.python.org/3/library/asyncio-task.html",
+          "title": "Coroutines and tasks — Python 3.14.8 documentation",
+          "source": "bing",
+          "canonical_url": "https://docs.python.org/3/library/asyncio-task.html",
+          "provenance": [
+            {
+              "engine": "Bing/en-US",
+              "rank": 4,
+              "url": "https://docs.python.org/3/library/asyncio-task.html",
+              "query": "Python asyncio official documentation"
+            }
+          ],
+          "queries": [
+            "Python asyncio official documentation"
+          ]
+        },
+        {
+          "url": "https://docs.python.org/3/library/asyncio-threading.html",
+          "title": "asyncio and free-threaded Python — Python 3.14.8 documentation",
+          "source": "bing",
+          "canonical_url": "https://docs.python.org/3/library/asyncio-threading.html",
+          "provenance": [
+            {
+              "engine": "Bing/en-US",
+              "rank": 5,
+              "url": "https://docs.python.org/3/library/asyncio-threading.html",
+              "query": "Python asyncio official documentation"
+            }
+          ],
+          "queries": [
+            "Python asyncio official documentation"
+          ]
+        }
+      ],
+      "batch": {
+        "time_budget_seconds": 30.0,
+        "elapsed_seconds": 5.547,
+        "deadline_exceeded": false,
+        "complete": true,
+        "completed": 1,
+        "timed_out": 0,
+        "not_started": 0
+      },
+      "checked_links": 5,
+      "domain_check": true,
+      "domain_violations": [],
+      "reference_found": true,
+      "first_reference_rank": 1,
+      "reciprocal_rank": 1.0,
+      "checked_results": [
+        {
+          "rank": 1,
+          "url": "https://docs.python.org/3/library/asyncio.html",
+          "domain_allowed": true,
+          "reference_match": true
+        },
+        {
+          "rank": 2,
+          "url": "https://docs.python.org/3/howto/a-conceptual-overview-of-asyncio.html",
+          "domain_allowed": true,
+          "reference_match": false
+        },
+        {
+          "rank": 3,
+          "url": "https://docs.python.org/3/library/asyncio-dev.html",
+          "domain_allowed": true,
+          "reference_match": false
+        },
+        {
+          "rank": 4,
+          "url": "https://docs.python.org/3/library/asyncio-task.html",
+          "domain_allowed": true,
+          "reference_match": false
+        },
+        {
+          "rank": 5,
+          "url": "https://docs.python.org/3/library/asyncio-threading.html",
+          "domain_allowed": true,
+          "reference_match": false
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "query": "Python asyncio official documentation",
+      "search_status": "results",
+      "complete": false,
+      "strategy": "merge",
+      "include_domains": [
+        "docs.python.org"
+      ],
+      "exclude_domains": [],
+      "diagnostics": [
+        "DuckDuckGo：访问受限或需要验证（HTTP 202）"
+      ],
+      "attempts": [
+        {
+          "engine": "DuckDuckGo",
+          "status": "failed",
+          "error": "访问受限或需要验证（HTTP 202）"
+        },
+        {
+          "engine": "Bing/en-US",
+          "status": "success",
+          "returned": 10,
+          "accepted": 10,
+          "filtered": 0
+        }
+      ],
+      "filtered_count": 0,
+      "deadline_exceeded": false,
+      "result_urls": [
+        "https://docs.python.org/3/library/asyncio.html",
+        "https://docs.python.org/3/howto/a-conceptual-overview-of-asyncio.html",
+        "https://docs.python.org/3/library/asyncio-dev.html",
+        "https://docs.python.org/3/library/asyncio-task.html",
+        "https://docs.python.org/3/library/asyncio-threading.html"
+      ],
+      "case_id": "asyncio-en",
+      "language": "en",
+      "repeat": 1,
+      "elapsed_seconds": 6.031,
+      "results": [
+        {
+          "url": "https://docs.python.org/3/library/asyncio.html",
+          "title": "asyncio — Asynchronous I/O — Python 3.14.8 documentation",
+          "source": "bing",
+          "canonical_url": "https://docs.python.org/3/library/asyncio.html",
+          "provenance": [
+            {
+              "engine": "Bing/en-US",
+              "rank": 1,
+              "url": "https://docs.python.org/3/library/asyncio.html",
+              "query": "Python asyncio official documentation"
+            }
+          ],
+          "queries": [
+            "Python asyncio official documentation"
+          ]
+        },
+        {
+          "url": "https://docs.python.org/3/howto/a-conceptual-overview-of-asyncio.html",
+          "title": "A Conceptual Overview of asyncio — Python 3.14.8 documentation",
+          "source": "bing",
+          "canonical_url": "https://docs.python.org/3/howto/a-conceptual-overview-of-asyncio.html",
+          "provenance": [
+            {
+              "engine": "Bing/en-US",
+              "rank": 2,
+              "url": "https://docs.python.org/3/howto/a-conceptual-overview-of-asyncio.html",
+              "query": "Python asyncio official documentation"
+            }
+          ],
+          "queries": [
+            "Python asyncio official documentation"
+          ]
+        },
+        {
+          "url": "https://docs.python.org/3/library/asyncio-dev.html",
+          "title": "Developing with asyncio — Python 3.14.8 documentation",
+          "source": "bing",
+          "canonical_url": "https://docs.python.org/3/library/asyncio-dev.html",
+          "provenance": [
+            {
+              "engine": "Bing/en-US",
+              "rank": 3,
+              "url": "https://docs.python.org/3/library/asyncio-dev.html",
+              "query": "Python asyncio official documentation"
+            }
+          ],
+          "queries": [
+            "Python asyncio official documentation"
+          ]
+        },
+        {
+          "url": "https://docs.python.org/3/library/asyncio-task.html",
+          "title": "Coroutines and tasks — Python 3.14.8 documentation",
+          "source": "bing",
+          "canonical_url": "https://docs.python.org/3/library/asyncio-task.html",
+          "provenance": [
+            {
+              "engine": "Bing/en-US",
+              "rank": 4,
+              "url": "https://docs.python.org/3/library/asyncio-task.html",
+              "query": "Python asyncio official documentation"
+            }
+          ],
+          "queries": [
+            "Python asyncio official documentation"
+          ]
+        },
+        {
+          "url": "https://docs.python.org/3/library/asyncio-threading.html",
+          "title": "asyncio and free-threaded Python — Python 3.14.8 documentation",
+          "source": "bing",
+          "canonical_url": "https://docs.python.org/3/library/asyncio-threading.html",
+          "provenance": [
+            {
+              "engine": "Bing/en-US",
+              "rank": 5,
+              "url": "https://docs.python.org/3/library/asyncio-threading.html",
+              "query": "Python asyncio official documentation"
+            }
+          ],
+          "queries": [
+            "Python asyncio official documentation"
+          ]
+        }
+      ],
+      "batch": {
+        "time_budget_seconds": 30.0,
+        "elapsed_seconds": 6.031,
+        "deadline_exceeded": false,
+        "complete": true,
+        "completed": 1,
+        "timed_out": 0,
+        "not_started": 0
+      },
+      "checked_links": 5,
+      "domain_check": true,
+      "domain_violations": [],
+      "reference_found": true,
+      "first_reference_rank": 1,
+      "reciprocal_rank": 1.0,
+      "checked_results": [
+        {
+          "rank": 1,
+          "url": "https://docs.python.org/3/library/asyncio.html",
+          "domain_allowed": true,
+          "reference_match": true
+        },
+        {
+          "rank": 2,
+          "url": "https://docs.python.org/3/howto/a-conceptual-overview-of-asyncio.html",
+          "domain_allowed": true,
+          "reference_match": false
+        },
+        {
+          "rank": 3,
+          "url": "https://docs.python.org/3/library/asyncio-dev.html",
+          "domain_allowed": true,
+          "reference_match": false
+        },
+        {
+          "rank": 4,
+          "url": "https://docs.python.org/3/library/asyncio-task.html",
+          "domain_allowed": true,
+          "reference_match": false
+        },
+        {
+          "rank": 5,
+          "url": "https://docs.python.org/3/library/asyncio-threading.html",
+          "domain_allowed": true,
+          "reference_match": false
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "query": "Python asyncio 官方文档",
+      "search_status": "results",
+      "complete": false,
+      "strategy": "merge",
+      "include_domains": [
+        "docs.python.org"
+      ],
+      "exclude_domains": [],
+      "diagnostics": [
+        "DuckDuckGo：访问受限或需要验证（HTTP 202）"
+      ],
+      "attempts": [
+        {
+          "engine": "Bing/zh-CN",
+          "status": "success",
+          "returned": 10,
+          "accepted": 1,
+          "filtered": 9
+        },
+        {
+          "engine": "DuckDuckGo",
+          "status": "failed",
+          "error": "访问受限或需要验证（HTTP 202）"
+        }
+      ],
+      "filtered_count": 9,
+      "deadline_exceeded": false,
+      "result_urls": [
+        "https://docs.python.org/zh-cn/"
+      ],
+      "case_id": "asyncio-zh",
+      "language": "zh",
+      "repeat": 1,
+      "elapsed_seconds": 5.734,
+      "results": [
+        {
+          "url": "https://docs.python.org/zh-cn/",
+          "title": "Python 3.14.8 文档",
+          "source": "bing",
+          "canonical_url": "https://docs.python.org/zh-cn/",
+          "provenance": [
+            {
+              "engine": "Bing/zh-CN",
+              "rank": 5,
+              "url": "https://docs.python.org/zh-cn/",
+              "query": "Python asyncio 官方文档"
+            }
+          ],
+          "queries": [
+            "Python asyncio 官方文档"
+          ]
+        }
+      ],
+      "batch": {
+        "time_budget_seconds": 30.0,
+        "elapsed_seconds": 5.734,
+        "deadline_exceeded": false,
+        "complete": true,
+        "completed": 1,
+        "timed_out": 0,
+        "not_started": 0
+      },
+      "checked_links": 1,
+      "domain_check": true,
+      "domain_violations": [],
+      "reference_found": false,
+      "first_reference_rank": null,
+      "reciprocal_rank": 0,
+      "checked_results": [
+        {
+          "rank": 1,
+          "url": "https://docs.python.org/zh-cn/",
+          "domain_allowed": true,
+          "reference_match": false
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "query": "Python asyncio 官方文档",
+      "search_status": "results",
+      "complete": true,
+      "strategy": "fallback",
+      "include_domains": [
+        "docs.python.org"
+      ],
+      "exclude_domains": [],
+      "diagnostics": [],
+      "attempts": [
+        {
+          "engine": "Bing/zh-CN",
+          "status": "success",
+          "returned": 10,
+          "accepted": 1,
+          "filtered": 9
+        }
+      ],
+      "filtered_count": 9,
+      "deadline_exceeded": false,
+      "result_urls": [
+        "https://docs.python.org/zh-cn/"
+      ],
+      "case_id": "asyncio-zh",
+      "language": "zh",
+      "repeat": 1,
+      "elapsed_seconds": 6.282,
+      "results": [
+        {
+          "url": "https://docs.python.org/zh-cn/",
+          "title": "Python 3.14.8 文档",
+          "source": "bing",
+          "canonical_url": "https://docs.python.org/zh-cn/",
+          "provenance": [
+            {
+              "engine": "Bing/zh-CN",
+              "rank": 5,
+              "url": "https://docs.python.org/zh-cn/",
+              "query": "Python asyncio 官方文档"
+            }
+          ],
+          "queries": [
+            "Python asyncio 官方文档"
+          ]
+        }
+      ],
+      "batch": {
+        "time_budget_seconds": 30.0,
+        "elapsed_seconds": 6.266,
+        "deadline_exceeded": false,
+        "complete": true,
+        "completed": 1,
+        "timed_out": 0,
+        "not_started": 0
+      },
+      "checked_links": 1,
+      "domain_check": true,
+      "domain_violations": [],
+      "reference_found": false,
+      "first_reference_rank": null,
+      "reciprocal_rank": 0,
+      "checked_results": [
+        {
+          "rank": 1,
+          "url": "https://docs.python.org/zh-cn/",
+          "domain_allowed": true,
+          "reference_match": false
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "query": "React useEffect official documentation",
+      "search_status": "results",
+      "complete": false,
+      "strategy": "fallback",
+      "include_domains": [
+        "react.dev"
+      ],
+      "exclude_domains": [],
+      "diagnostics": [
+        "DuckDuckGo：访问受限或需要验证（HTTP 202）"
+      ],
+      "attempts": [
+        {
+          "engine": "DuckDuckGo",
+          "status": "failed",
+          "error": "访问受限或需要验证（HTTP 202）"
+        },
+        {
+          "engine": "Bing/en-US",
+          "status": "success",
+          "returned": 10,
+          "accepted": 0,
+          "filtered": 10
+        },
+        {
+          "engine": "Bing/zh-CN",
+          "status": "success",
+          "returned": 10,
+          "accepted": 3,
+          "filtered": 7
+        }
+      ],
+      "filtered_count": 17,
+      "deadline_exceeded": false,
+      "result_urls": [
+        "https://zh-hans.react.dev/learn",
+        "https://react.dev/",
+        "https://react.dev/learn"
+      ],
+      "case_id": "react-effect-en",
+      "language": "en",
+      "repeat": 1,
+      "elapsed_seconds": 12.0,
+      "results": [
+        {
+          "url": "https://zh-hans.react.dev/learn",
+          "title": "快速入门 – React 中文文档",
+          "source": "bing",
+          "canonical_url": "https://zh-hans.react.dev/learn",
+          "provenance": [
+            {
+              "engine": "Bing/zh-CN",
+              "rank": 1,
+              "url": "https://zh-hans.react.dev/learn",
+              "query": "React useEffect official documentation"
+            }
+          ],
+          "queries": [
+            "React useEffect official documentation"
+          ]
+        },
+        {
+          "url": "https://react.dev/",
+          "title": "React",
+          "source": "bing",
+          "canonical_url": "https://react.dev/",
+          "provenance": [
+            {
+              "engine": "Bing/zh-CN",
+              "rank": 2,
+              "url": "https://react.dev/",
+              "query": "React useEffect official documentation"
+            }
+          ],
+          "queries": [
+            "React useEffect official documentation"
+          ]
+        },
+        {
+          "url": "https://react.dev/learn",
+          "title": "Quick Start – React",
+          "source": "bing",
+          "canonical_url": "https://react.dev/learn",
+          "provenance": [
+            {
+              "engine": "Bing/zh-CN",
+              "rank": 4,
+              "url": "https://react.dev/learn",
+              "query": "React useEffect official documentation"
+            }
+          ],
+          "queries": [
+            "React useEffect official documentation"
+          ]
+        }
+      ],
+      "batch": {
+        "time_budget_seconds": 30.0,
+        "elapsed_seconds": 12.0,
+        "deadline_exceeded": false,
+        "complete": true,
+        "completed": 1,
+        "timed_out": 0,
+        "not_started": 0
+      },
+      "checked_links": 3,
+      "domain_check": true,
+      "domain_violations": [],
+      "reference_found": false,
+      "first_reference_rank": null,
+      "reciprocal_rank": 0,
+      "checked_results": [
+        {
+          "rank": 1,
+          "url": "https://zh-hans.react.dev/learn",
+          "domain_allowed": true,
+          "reference_match": false
+        },
+        {
+          "rank": 2,
+          "url": "https://react.dev/",
+          "domain_allowed": true,
+          "reference_match": false
+        },
+        {
+          "rank": 3,
+          "url": "https://react.dev/learn",
+          "domain_allowed": true,
+          "reference_match": false
+        }
+      ]
+    },
+    {
+      "ok": false,
+      "query": "React useEffect official documentation",
+      "search_status": "incomplete",
+      "complete": false,
+      "strategy": "merge",
+      "include_domains": [
+        "react.dev"
+      ],
+      "exclude_domains": [],
+      "diagnostics": [
+        "DuckDuckGo：访问受限或需要验证（HTTP 202）"
+      ],
+      "attempts": [
+        {
+          "engine": "DuckDuckGo",
+          "status": "failed",
+          "error": "访问受限或需要验证（HTTP 202）"
+        },
+        {
+          "engine": "Bing/en-US",
+          "status": "success",
+          "returned": 10,
+          "accepted": 0,
+          "filtered": 10
+        }
+      ],
+      "filtered_count": 10,
+      "deadline_exceeded": false,
+      "result_urls": [],
+      "case_id": "react-effect-en",
+      "language": "en",
+      "repeat": 1,
+      "elapsed_seconds": 6.641,
+      "results": [],
+      "batch": {
+        "time_budget_seconds": 30.0,
+        "elapsed_seconds": 6.641,
+        "deadline_exceeded": false,
+        "complete": true,
+        "completed": 1,
+        "timed_out": 0,
+        "not_started": 0
+      },
+      "checked_links": 0,
+      "domain_check": null,
+      "domain_violations": [],
+      "reference_found": false,
+      "first_reference_rank": null,
+      "reciprocal_rank": 0,
+      "checked_results": []
+    },
+    {
+      "ok": true,
+      "query": "React useEffect 官方文档",
+      "search_status": "results",
+      "complete": false,
+      "strategy": "merge",
+      "include_domains": [
+        "react.dev"
+      ],
+      "exclude_domains": [],
+      "diagnostics": [
+        "DuckDuckGo：访问受限或需要验证（HTTP 202）"
+      ],
+      "attempts": [
+        {
+          "engine": "Bing/zh-CN",
+          "status": "success",
+          "returned": 10,
+          "accepted": 3,
+          "filtered": 7
+        },
+        {
+          "engine": "DuckDuckGo",
+          "status": "failed",
+          "error": "访问受限或需要验证（HTTP 202）"
+        }
+      ],
+      "filtered_count": 7,
+      "deadline_exceeded": false,
+      "result_urls": [
+        "https://zh-hans.react.dev/learn",
+        "https://react.dev/",
+        "https://react.dev/learn"
+      ],
+      "case_id": "react-effect-zh",
+      "language": "zh",
+      "repeat": 1,
+      "elapsed_seconds": 5.343,
+      "results": [
+        {
+          "url": "https://zh-hans.react.dev/learn",
+          "title": "快速入门 – React 中文文档",
+          "source": "bing",
+          "canonical_url": "https://zh-hans.react.dev/learn",
+          "provenance": [
+            {
+              "engine": "Bing/zh-CN",
+              "rank": 1,
+              "url": "https://zh-hans.react.dev/learn",
+              "query": "React useEffect 官方文档"
+            }
+          ],
+          "queries": [
+            "React useEffect 官方文档"
+          ]
+        },
+        {
+          "url": "https://react.dev/",
+          "title": "React",
+          "source": "bing",
+          "canonical_url": "https://react.dev/",
+          "provenance": [
+            {
+              "engine": "Bing/zh-CN",
+              "rank": 2,
+              "url": "https://react.dev/",
+              "query": "React useEffect 官方文档"
+            }
+          ],
+          "queries": [
+            "React useEffect 官方文档"
+          ]
+        },
+        {
+          "url": "https://react.dev/learn",
+          "title": "Quick Start – React",
+          "source": "bing",
+          "canonical_url": "https://react.dev/learn",
+          "provenance": [
+            {
+              "engine": "Bing/zh-CN",
+              "rank": 4,
+              "url": "https://react.dev/learn",
+              "query": "React useEffect 官方文档"
+            }
+          ],
+          "queries": [
+            "React useEffect 官方文档"
+          ]
+        }
+      ],
+      "batch": {
+        "time_budget_seconds": 30.0,
+        "elapsed_seconds": 5.343,
+        "deadline_exceeded": false,
+        "complete": true,
+        "completed": 1,
+        "timed_out": 0,
+        "not_started": 0
+      },
+      "checked_links": 3,
+      "domain_check": true,
+      "domain_violations": [],
+      "reference_found": false,
+      "first_reference_rank": null,
+      "reciprocal_rank": 0,
+      "checked_results": [
+        {
+          "rank": 1,
+          "url": "https://zh-hans.react.dev/learn",
+          "domain_allowed": true,
+          "reference_match": false
+        },
+        {
+          "rank": 2,
+          "url": "https://react.dev/",
+          "domain_allowed": true,
+          "reference_match": false
+        },
+        {
+          "rank": 3,
+          "url": "https://react.dev/learn",
+          "domain_allowed": true,
+          "reference_match": false
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "query": "React useEffect 官方文档",
+      "search_status": "results",
+      "complete": true,
+      "strategy": "fallback",
+      "include_domains": [
+        "react.dev"
+      ],
+      "exclude_domains": [],
+      "diagnostics": [],
+      "attempts": [
+        {
+          "engine": "Bing/zh-CN",
+          "status": "success",
+          "returned": 10,
+          "accepted": 3,
+          "filtered": 7
+        }
+      ],
+      "filtered_count": 7,
+      "deadline_exceeded": false,
+      "result_urls": [
+        "https://zh-hans.react.dev/learn",
+        "https://react.dev/",
+        "https://react.dev/learn"
+      ],
+      "case_id": "react-effect-zh",
+      "language": "zh",
+      "repeat": 1,
+      "elapsed_seconds": 6.047,
+      "results": [
+        {
+          "url": "https://zh-hans.react.dev/learn",
+          "title": "快速入门 – React 中文文档",
+          "source": "bing",
+          "canonical_url": "https://zh-hans.react.dev/learn",
+          "provenance": [
+            {
+              "engine": "Bing/zh-CN",
+              "rank": 1,
+              "url": "https://zh-hans.react.dev/learn",
+              "query": "React useEffect 官方文档"
+            }
+          ],
+          "queries": [
+            "React useEffect 官方文档"
+          ]
+        },
+        {
+          "url": "https://react.dev/",
+          "title": "React",
+          "source": "bing",
+          "canonical_url": "https://react.dev/",
+          "provenance": [
+            {
+              "engine": "Bing/zh-CN",
+              "rank": 2,
+              "url": "https://react.dev/",
+              "query": "React useEffect 官方文档"
+            }
+          ],
+          "queries": [
+            "React useEffect 官方文档"
+          ]
+        },
+        {
+          "url": "https://react.dev/learn",
+          "title": "Quick Start – React",
+          "source": "bing",
+          "canonical_url": "https://react.dev/learn",
+          "provenance": [
+            {
+              "engine": "Bing/zh-CN",
+              "rank": 4,
+              "url": "https://react.dev/learn",
+              "query": "React useEffect 官方文档"
+            }
+          ],
+          "queries": [
+            "React useEffect 官方文档"
+          ]
+        }
+      ],
+      "batch": {
+        "time_budget_seconds": 30.0,
+        "elapsed_seconds": 6.047,
+        "deadline_exceeded": false,
+        "complete": true,
+        "completed": 1,
+        "timed_out": 0,
+        "not_started": 0
+      },
+      "checked_links": 3,
+      "domain_check": true,
+      "domain_violations": [],
+      "reference_found": false,
+      "first_reference_rank": null,
+      "reciprocal_rank": 0,
+      "checked_results": [
+        {
+          "rank": 1,
+          "url": "https://zh-hans.react.dev/learn",
+          "domain_allowed": true,
+          "reference_match": false
+        },
+        {
+          "rank": 2,
+          "url": "https://react.dev/",
+          "domain_allowed": true,
+          "reference_match": false
+        },
+        {
+          "rank": 3,
+          "url": "https://react.dev/learn",
+          "domain_allowed": true,
+          "reference_match": false
+        }
+      ]
+    },
+    {
+      "ok": false,
+      "query": "FastAPI dependency injection official documentation",
+      "search_status": "incomplete",
+      "complete": false,
+      "strategy": "fallback",
+      "include_domains": [
+        "fastapi.tiangolo.com"
+      ],
+      "exclude_domains": [],
+      "diagnostics": [
+        "DuckDuckGo：访问受限或需要验证（HTTP 202）"
+      ],
+      "attempts": [
+        {
+          "engine": "DuckDuckGo",
+          "status": "failed",
+          "error": "访问受限或需要验证（HTTP 202）"
+        },
+        {
+          "engine": "Bing/en-US",
+          "status": "success",
+          "returned": 10,
+          "accepted": 0,
+          "filtered": 10
+        },
+        {
+          "engine": "Bing/zh-CN",
+          "status": "success",
+          "returned": 10,
+          "accepted": 0,
+          "filtered": 10
+        }
+      ],
+      "filtered_count": 20,
+      "deadline_exceeded": false,
+      "result_urls": [],
+      "case_id": "fastapi-dependencies-en",
+      "language": "en",
+      "repeat": 1,
+      "elapsed_seconds": 12.078,
+      "results": [],
+      "batch": {
+        "time_budget_seconds": 30.0,
+        "elapsed_seconds": 12.078,
+        "deadline_exceeded": false,
+        "complete": true,
+        "completed": 1,
+        "timed_out": 0,
+        "not_started": 0
+      },
+      "checked_links": 0,
+      "domain_check": null,
+      "domain_violations": [],
+      "reference_found": false,
+      "first_reference_rank": null,
+      "reciprocal_rank": 0,
+      "checked_results": []
+    },
+    {
+      "ok": false,
+      "query": "FastAPI dependency injection official documentation",
+      "search_status": "incomplete",
+      "complete": false,
+      "strategy": "merge",
+      "include_domains": [
+        "fastapi.tiangolo.com"
+      ],
+      "exclude_domains": [],
+      "diagnostics": [
+        "DuckDuckGo：访问受限或需要验证（HTTP 202）"
+      ],
+      "attempts": [
+        {
+          "engine": "DuckDuckGo",
+          "status": "failed",
+          "error": "访问受限或需要验证（HTTP 202）"
+        },
+        {
+          "engine": "Bing/en-US",
+          "status": "success",
+          "returned": 10,
+          "accepted": 0,
+          "filtered": 10
+        }
+      ],
+      "filtered_count": 10,
+      "deadline_exceeded": false,
+      "result_urls": [],
+      "case_id": "fastapi-dependencies-en",
+      "language": "en",
+      "repeat": 1,
+      "elapsed_seconds": 7.407,
+      "results": [],
+      "batch": {
+        "time_budget_seconds": 30.0,
+        "elapsed_seconds": 7.407,
+        "deadline_exceeded": false,
+        "complete": true,
+        "completed": 1,
+        "timed_out": 0,
+        "not_started": 0
+      },
+      "checked_links": 0,
+      "domain_check": null,
+      "domain_violations": [],
+      "reference_found": false,
+      "first_reference_rank": null,
+      "reciprocal_rank": 0,
+      "checked_results": []
+    },
+    {
+      "ok": false,
+      "query": "FastAPI 依赖注入 官方文档",
+      "search_status": "incomplete",
+      "complete": false,
+      "strategy": "merge",
+      "include_domains": [
+        "fastapi.tiangolo.com"
+      ],
+      "exclude_domains": [],
+      "diagnostics": [
+        "DuckDuckGo：访问受限或需要验证（HTTP 202）"
+      ],
+      "attempts": [
+        {
+          "engine": "Bing/zh-CN",
+          "status": "success",
+          "returned": 0,
+          "accepted": 0,
+          "filtered": 0
+        },
+        {
+          "engine": "DuckDuckGo",
+          "status": "failed",
+          "error": "访问受限或需要验证（HTTP 202）"
+        }
+      ],
+      "filtered_count": 0,
+      "deadline_exceeded": false,
+      "result_urls": [],
+      "case_id": "fastapi-dependencies-zh",
+      "language": "zh",
+      "repeat": 1,
+      "elapsed_seconds": 4.656,
+      "results": [],
+      "batch": {
+        "time_budget_seconds": 30.0,
+        "elapsed_seconds": 4.656,
+        "deadline_exceeded": false,
+        "complete": true,
+        "completed": 1,
+        "timed_out": 0,
+        "not_started": 0
+      },
+      "checked_links": 0,
+      "domain_check": null,
+      "domain_violations": [],
+      "reference_found": false,
+      "first_reference_rank": null,
+      "reciprocal_rank": 0,
+      "checked_results": []
+    },
+    {
+      "ok": false,
+      "query": "FastAPI 依赖注入 官方文档",
+      "search_status": "incomplete",
+      "complete": false,
+      "strategy": "fallback",
+      "include_domains": [
+        "fastapi.tiangolo.com"
+      ],
+      "exclude_domains": [],
+      "diagnostics": [
+        "DuckDuckGo：访问受限或需要验证（HTTP 202）"
+      ],
+      "attempts": [
+        {
+          "engine": "Bing/zh-CN",
+          "status": "success",
+          "returned": 10,
+          "accepted": 0,
+          "filtered": 10
+        },
+        {
+          "engine": "DuckDuckGo",
+          "status": "failed",
+          "error": "访问受限或需要验证（HTTP 202）"
+        }
+      ],
+      "filtered_count": 10,
+      "deadline_exceeded": false,
+      "result_urls": [],
+      "case_id": "fastapi-dependencies-zh",
+      "language": "zh",
+      "repeat": 1,
+      "elapsed_seconds": 6.407,
+      "results": [],
+      "batch": {
+        "time_budget_seconds": 30.0,
+        "elapsed_seconds": 6.407,
+        "deadline_exceeded": false,
+        "complete": true,
+        "completed": 1,
+        "timed_out": 0,
+        "not_started": 0
+      },
+      "checked_links": 0,
+      "domain_check": null,
+      "domain_violations": [],
+      "reference_found": false,
+      "first_reference_rank": null,
+      "reciprocal_rank": 0,
+      "checked_results": []
+    }
+  ],
+  "summary": [
+    {
+      "strategy": "fallback",
+      "language": "en",
+      "runs": 3,
+      "with_results": 2,
+      "reference_found": 1,
+      "mean_reciprocal_rank": 0.3333,
+      "complete_searches": 0,
+      "incomplete_without_reference": 2,
+      "domain_violations": 0,
+      "median_elapsed_seconds": 12.0
+    },
+    {
+      "strategy": "fallback",
+      "language": "zh",
+      "runs": 3,
+      "with_results": 2,
+      "reference_found": 0,
+      "mean_reciprocal_rank": 0,
+      "complete_searches": 2,
+      "incomplete_without_reference": 1,
+      "domain_violations": 0,
+      "median_elapsed_seconds": 6.282
+    },
+    {
+      "strategy": "merge",
+      "language": "en",
+      "runs": 3,
+      "with_results": 1,
+      "reference_found": 1,
+      "mean_reciprocal_rank": 0.3333,
+      "complete_searches": 0,
+      "incomplete_without_reference": 2,
+      "domain_violations": 0,
+      "median_elapsed_seconds": 6.641
+    },
+    {
+      "strategy": "merge",
+      "language": "zh",
+      "runs": 3,
+      "with_results": 2,
+      "reference_found": 0,
+      "mean_reciprocal_rank": 0,
+      "complete_searches": 0,
+      "incomplete_without_reference": 3,
+      "domain_violations": 0,
+      "median_elapsed_seconds": 5.343
+    }
+  ],
+  "checked_at": "2026-10-04T10:25:33.824469+00:00",
+  "publication_note": "Result snippets omitted from this public copy; URLs, titles, provenance, diagnostics and metrics are preserved."
+}

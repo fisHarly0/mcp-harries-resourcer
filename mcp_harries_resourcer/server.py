@@ -82,6 +82,14 @@ def _clean_ddg_url(href: str) -> str:
     return href
 
 
+def _search_text(element) -> str:
+    # Preserve spaces around inline highlights without splitting identifiers or
+    # adding spaces before punctuation. HTML line breaks still separate words.
+    for br in element.find_all("br"):
+        br.replace_with(" ")
+    return " ".join(element.get_text().split())
+
+
 def _parse_ddg(html: str, max_results: int) -> list[dict]:
     soup = BeautifulSoup(html, "html.parser")
     out = []
@@ -90,9 +98,9 @@ def _parse_ddg(html: str, max_results: int) -> list[dict]:
         if not a:
             continue
         url = _clean_ddg_url(a.get("href", ""))
-        title = a.get_text(strip=True)
+        title = _search_text(a)
         snip = div.select_one(".result__snippet")
-        snippet = snip.get_text(" ", strip=True) if snip else ""
+        snippet = _search_text(snip) if snip else ""
         if urlparse(url).scheme in {"http", "https"} and title and not any(it["url"] == url for it in out):
             out.append({"url": url, "title": title, "snippet": snippet, "source": "ddg"})
         if len(out) >= max_results:
@@ -126,9 +134,9 @@ def _parse_bing(html: str, max_results: int) -> list[dict]:
         if not a:
             continue
         url = _clean_bing_url(a.get("href", ""))
-        title = a.get_text(strip=True)
+        title = _search_text(a)
         p = li.select_one("p, .b_caption p")
-        snippet = p.get_text(" ", strip=True) if p else ""
+        snippet = _search_text(p) if p else ""
         if urlparse(url).scheme in {"http", "https"} and title and not any(it["url"] == url for it in out):
             out.append({"url": url, "title": title, "snippet": snippet, "source": "bing"})
         if len(out) >= max_results:

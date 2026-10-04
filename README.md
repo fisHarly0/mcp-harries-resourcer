@@ -189,7 +189,7 @@ macOS / Linux 使用 `.venv/bin/python -m unittest discover -s tests -v`。
 
 分页、刷新、版本变化和 JSON 参数还会通过本地 HTTP 页面与真实 MCP 子进程验证。当前持续优化方向与各批次验收条件见 [优化路线](docs/roadmap.md)。
 
-可选的真实搜索检查：`python scripts/search_smoke.py --output <结果文件.json>`。它通过真实 MCP 子进程比较固定中英文查询的两种策略，会访问搜索引擎；输出链接、耗时、来源、筛选数量和失败原因。没有结果时域名检查标记为 `null`，不能据此声称搜索质量达标。实测记录见 [搜索说明](docs/search.md#本批验证)。
+可选的真实搜索检查：`python scripts/search_smoke.py --output <结果文件.json>`。默认比较 6 个中英文案例的两种策略，分别检查域名和已知专题页命中，保留原始结果、耗时和失败原因。空结果的域名检查为 `null`，官方首页也不会算成专题页命中；支持选案例、重复运行和中断后保留记录。参数和实测见 [搜索质量验证](docs/search-quality.md)。
 
 ### 项目结构
 
