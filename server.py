@@ -38,6 +38,7 @@ from parse_policy import ParseFailure, ParsePolicy
 from task_cleanup import cancel_and_wait, wait_for_owned
 from progress import CompletionCounter, report, with_progress
 from client_pool import ClientPool
+from local_search import DEFAULT_EXCLUDES, DEFAULT_EXTENSIONS, search_async as local_search, format_result as format_local
 from search_results import merge_results, normalize_domains, select_results, url_identity
 
 DEFAULT_TIMEOUT = 25.0
@@ -846,61 +847,46 @@ async def deep_research(
 # ───────────────────────── tools: local & save ─────────────────────────
 
 @mcp.tool()
-def search_local(
+async def search_local(
     query: str,
     root: str,
     max_results: int = 50,
-    include_ext: str = "txt,md,py,js,ts,json,html,htm,csv,yaml,yml,toml,gd,godot",
+    include_ext: str = DEFAULT_EXTENSIONS,
+    collection: str = "",
+    tags: str = "",
+    source_domain: str = "",
+    exclude_dirs: str = DEFAULT_EXCLUDES,
+    max_entries: int = 100000,
+    max_file_bytes: int = 2097152,
+    time_budget_seconds: float = 10,
+    response_format: Literal["text", "json"] = "text",
 ) -> str:
-    """在本地目录递归全文搜索（不区分大小写，子串匹配）。
+    """本地文本搜索，可按 save_finding 保存的集合、标签和来源域名筛选。
 
     Args:
-        query: 关键词
-        root: 根目录绝对路径
-        max_results: 最多返回多少处匹配
-        include_ext: 仅搜索的扩展名（逗号分隔，不带点）；留空则搜所有
+        query: 不区分大小写的子串；有元数据筛选时可留空以列出笔记
+        root: 搜索根目录；只读取，不创建索引
+        max_results: 最多匹配数，1–1000；关键词搜索按行计数，纯筛选按文件计数
+        include_ext: 逗号分隔的扩展名；留空搜索所有普通文件
+        collection: 原始集合名称，精确匹配、不区分大小写
+        tags: 逗号分隔的标签，必须全部匹配、不区分大小写
+        source_domain: 来源裸域名，包含子域名；不是正文关键词
+        exclude_dirs: 排除的目录名，逗号分隔；覆盖默认值，留空不排除目录名
+        max_entries: 遍历条目上限（文件和目录），1–1000000
+        max_file_bytes: 单文件读取上限，默认 2 MiB，最大 16 MiB
+        time_budget_seconds: 协作式扫描时限，默认 10 秒，最大 600 秒
+        response_format: text 或 json；含扫描统计、跳过原因和完整性
     """
-    root_path = Path(root)
-    if not root_path.exists():
-        return f"目录不存在：{root}"
-    if not root_path.is_dir():
-        return f"不是目录：{root}"
-
-    exts = {f".{e.strip().lower()}" for e in include_ext.split(",") if e.strip()}
-    needle = query.lower()
-    skip_dirs = {".git", "node_modules", "__pycache__", ".venv", "venv", ".next", "dist", "build", ".godot"}
-
-    hits = []
-    for path in root_path.rglob("*"):
-        if any(part in skip_dirs for part in path.parts):
-            continue
-        if not path.is_file():
-            continue
-        if exts and path.suffix.lower() not in exts:
-            continue
-        try:
-            content = path.read_text(encoding="utf-8", errors="ignore")
-        except Exception:
-            continue
-        for lineno, line in enumerate(content.splitlines(), 1):
-            if needle in line.lower():
-                hits.append({"path": str(path), "line": lineno, "text": line.strip()[:200]})
-                if len(hits) >= max_results:
-                    break
-        if len(hits) >= max_results:
-            break
-
-    if not hits:
-        return f"在 {root} 中未找到 “{query}”"
-
-    lines = [f"# 本地搜索：{query}", f"root: {root}", f"命中 {len(hits)} 处\n"]
-    current = None
-    for h in hits:
-        if h["path"] != current:
-            current = h["path"]
-            lines.append(f"\n**{current}**")
-        lines.append(f"  L{h['line']}: {h['text']}")
-    return "\n".join(lines)
+    try:
+        if response_format not in {"text", "json"}:
+            raise ValueError("response_format 必须是 text 或 json")
+        result = await local_search(query, root, max_results, include_ext,
+                                    collection=collection, tags=tags, source_domain=source_domain,
+                                    exclude_dirs=exclude_dirs, max_entries=max_entries,
+                                    max_file_bytes=max_file_bytes, time_budget_seconds=time_budget_seconds)
+    except (ValueError, OSError) as exc:
+        return _tool_error(str(exc), response_format)
+    return json.dumps(result, ensure_ascii=False) if response_format == "json" else format_local(result)
 
 
 @mcp.tool()

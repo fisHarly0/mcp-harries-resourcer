@@ -431,12 +431,30 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
                         })
                         saved = await session.call_tool("save_finding", {
                             "collection": "smoke", "title": "MCP note", "content": "Protocol workflow verified.",
+                            "tags": "protocol, MCP", "source_url": "https://docs.python.org/3/",
                         })
                         self.assertFalse(saved.isError)
                         self.assertEqual(len(list((Path(tmp) / "smoke").glob("*.md"))), 1)
                         found = await session.call_tool("search_local", {"query": "Protocol workflow verified", "root": tmp})
                         self.assertFalse(found.isError)
                         self.assertIn("Protocol workflow verified", "\n".join(c.text for c in found.content if c.type == "text"))
+                        async def filtered(**extra):
+                            result = await session.call_tool("search_local", {
+                                "query": "", "root": tmp, "collection": "SMOKE", "tags": "mcp, protocol",
+                                "source_domain": "python.org", "response_format": "json", **extra})
+                            self.assertFalse(result.isError)
+                            return json.loads("\n".join(c.text for c in result.content if c.type == "text"))
+                        selected = await filtered()
+                        self.assertTrue(selected["complete"])
+                        self.assertEqual(len(selected["matches"]), 1)
+                        self.assertEqual(selected["matches"][0]["metadata"]["title"], "MCP note")
+                        self.assertIsNone(selected["matches"][0]["line"])
+                        note = Path(selected["matches"][0]["path"])
+                        note.write_text(note.read_text(encoding="utf-8").replace("verified", "updated"), encoding="utf-8")
+                        self.assertEqual(len((await filtered(query="updated"))["matches"]), 1)
+                        self.assertEqual((await filtered(query="verified"))["matches"], [])
+                        note.unlink()
+                        self.assertEqual((await filtered())["matches"], [])
                         empty = await session.call_tool("web_search", {"query": " "})
                         self.assertIn("关键词不能为空", "\n".join(c.text for c in empty.content if c.type == "text"))
         await asyncio.wait_for(workflow(), timeout=30)

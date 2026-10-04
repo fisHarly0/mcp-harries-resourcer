@@ -259,7 +259,7 @@ class SaveTests(unittest.TestCase):
             saved = next((Path(tmp) / "demo").glob("*.md"))
             text = saved.read_text(encoding="utf-8")
             self.assertEqual(json.loads(text.splitlines()[1].split(": ", 1)[1]), title)
-            self.assertIn("命中 1 处", server.search_local("searchable", tmp, include_ext="md"))
+            self.assertIn("命中 1 处", asyncio.run(server.search_local("searchable", tmp, include_ext="md")))
 
 
 if __name__ == "__main__":

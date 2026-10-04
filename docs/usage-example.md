@@ -75,6 +75,8 @@ tags: ["python", "asyncio"]
 
 调用 `search_local`：`query` 填 `asyncio`，`root` 填上一步实际保存目录的绝对路径，`include_ext` 填 `md`。结果包含文件名、行号和命中文本，可据此打开原始笔记。
 
+还可以填 `tags="python,asyncio"`、`source_domain="python.org"`，只搜索同时满足标签和来源条件的笔记。把 `query` 留空则直接列出符合条件的笔记，每文件一条；加 `response_format="json"` 可读取元数据与扫描完整性。需要按集合筛选时填写保存时的原始名称，详见 [本地资料检索](local-search.md)。
+
 ## 本地离线验收
 
 `python -m unittest discover -s tests -v` 会启动真实 stdio MCP 子进程，验证初始化、8 个工具的注册、保存文件和本地检索。搜索引擎解析与切换使用固定样本测试，避免把外网抖动误判成代码回归。

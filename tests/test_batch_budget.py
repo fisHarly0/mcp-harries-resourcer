@@ -227,14 +227,25 @@ class BatchToolTests(unittest.IsolatedAsyncioTestCase):
         client.assert_not_called()
 
     async def test_fetch_timeout_cleans_shared_inflight_and_keeps_completed_cache(self):
+        slow_started, slow_cancelled = asyncio.Event(), asyncio.Event()
         async def uncached(client, url):
             if url.endswith("fast"):
                 return page(url)
-            await asyncio.Event().wait()
+            slow_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                slow_cancelled.set()
         with patch.object(server, "_fetch_uncached", side_effect=uncached):
             data = json.loads(await server.fetch_pages(["https://example.org/fast", "https://example.org/slow"],
-                                                       time_budget_seconds=0.03, response_format="json"))
+                                                       # Exercise cleanup, not whether several nested tasks
+                                                       # can finish within 30 ms on a loaded Windows host.
+                                                       time_budget_seconds=1, response_format="json"))
         self.assertEqual(data["successful"], 1)
+        self.assertTrue(slow_started.is_set())
+        self.assertTrue(slow_cancelled.is_set())
+        self.assertTrue(data["batch"]["deadline_exceeded"])
+        self.assertEqual(data["unfinished_urls"], ["https://example.org/slow"])
         self.assertEqual(server.NETWORK.inflight, {})
         self.assertIsNone(server.NETWORK.cache.get("https://example.org/slow"))
         self.assertIsNotNone(server.NETWORK.cache.get("https://example.org/fast"))
