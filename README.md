@@ -30,7 +30,7 @@ Resourcer 是一个轻量 MCP 资料工具，把网页搜索、正文提取和�
 
 Markdown 保留所选正文的嵌套列表层级、有序列表起始编号和列表内代码缩进；表格里的 `a | b` 等行内代码也保持在一个单元格内。表格标题与数据分开，无表头表格保留首行数据，合并单元格以空位对齐；列表中的表格也会恢复到所属条目。超大跨度和更复杂布局仍需按原文核对。
 
-正文在独立 Python 进程中解析，默认最多同时解析 2 页、每页解析预算 20 秒（含排队与启动）。超时或取消会终止并回收对应解析进程，复杂正文不会一直占住主事件循环。进程启动和内存开销、时间边界见 [解析隔离](docs/parsing.md)。
+正文与 Bing／DuckDuckGo 搜索 HTML 在独立 Python 进程中解析，共用默认 2 个进程名额，每次解析预算 20 秒（含排队与启动）。超时或取消会终止并回收对应解析进程，大搜索页和复杂正文不会持续占住主事件循环；搜索解析失败可按原有策略切换引擎。进程启动和内存开销、时间边界见 [解析隔离](docs/parsing.md)。
 
 支持进度的 MCP 客户端可以接收搜索与读取通知：批量调用按已结束的查询／不同 URL 计数，调研先报告搜索阶段，再报告网页读取进度。成功与失败分别说明，整批到期不会把剩余项补成完成。启用方式与计数规则见 [进度反馈](docs/progress.md)。
 
@@ -147,8 +147,8 @@ claude mcp add --scope user resourcer -e RESOURCER_RESEARCH_ROOT=D:\research -- 
 | `RESOURCER_HTTP_RETRIES` | `1` | 可重试 HTTP 状态或网络故障最多追加尝试次数，范围 0–3 |
 | `RESOURCER_REQUEST_TIMEOUT_SECONDS` | `60` | 每个引擎尝试／单页抓取的异步时间预算，含重试等待；范围 1–300 秒 |
 | `RESOURCER_RESPONSE_MAX_BYTES` | `8388608` | 单个响应的传输数据及解压后数据上限，默认各 8 MiB；范围 1024–67108864 字节 |
-| `RESOURCER_PARSE_CONCURRENCY` | `2` | 同时运行的正文解析进程数，范围 1–5 |
-| `RESOURCER_PARSE_TIMEOUT_SECONDS` | `20` | 每页解析预算，包含解析排队、进程启动与结果传输，范围 1–120 秒 |
+| `RESOURCER_PARSE_CONCURRENCY` | `2` | 搜索 HTML 与正文共用的解析进程数，范围 1–5 |
+| `RESOURCER_PARSE_TIMEOUT_SECONDS` | `20` | 每次 HTML 解析预算，包含解析排队、进程启动与结果传输，范围 1–120 秒 |
 
 速率值设为 `0` 可关闭对应限速；任一缓存值设为 `0` 可关闭跨调用缓存。非法值会在 stderr 记录警告并使用默认值。设置修改后需要重新连接服务。
 
@@ -204,17 +204,18 @@ mcp-harries-resourcer/
 ├── server.py                # 旧版绝对路径启动兼容入口
 ├── mcp_harries_resourcer/   # 安装后的 Python 包
 │   ├── __main__.py          # CLI、--help、--version 与 stdio 启动
-│   ├── server.py            # 8 个 MCP 工具、搜索解析与资料保存
+│   ├── server.py            # 8 个 MCP 工具、搜索调度与资料保存
 │   ├── request_policy.py    # 请求限速、缓存和重复下载复用
 │   ├── client_pool.py       # HTTP 客户端复用与 Cookie 清理
 │   ├── http_policy.py       # 有界下载、重试和站点等待期
 │   ├── batch_budget.py      # 整批时限、部分结果
 │   ├── task_cleanup.py      # 超时与重复取消后的清理
 │   ├── progress.py          # 请求内进度和通知合并
+│   ├── search_content.py    # Bing／DuckDuckGo HTML 解析
 │   ├── search_results.py    # 域名筛选、URL 去重与来源合并
 │   ├── local_search.py      # 本地检索、筛选和扫描限制
 │   ├── page_content.py      # Markdown、代码保留与引用
-│   ├── parse_policy.py      # 正文解析进程管理
+│   ├── parse_policy.py      # 搜索与正文解析进程管理
 │   └── parse_worker.py      # 单页解析进程入口
 ├── requirements.txt        # 源码与安装包共用的依赖范围
 ├── CHANGELOG.md            # 版本记录

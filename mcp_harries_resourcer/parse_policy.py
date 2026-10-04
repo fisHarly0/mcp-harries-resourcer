@@ -1,4 +1,4 @@
-"""Bounded, cancellable article extraction in disposable Python processes."""
+"""Bounded, cancellable HTML extraction in disposable Python processes."""
 import asyncio
 import json
 import os
@@ -30,20 +30,45 @@ class ParsePolicy:
                    timeout=_setting("RESOURCER_PARSE_TIMEOUT_SECONDS", 20, 120, 1))
 
     async def parse(self, html, url):
+        return await self._parse({"html": html, "url": url})
+
+    async def parse_search(self, html, engine, max_results):
+        if engine not in {"ddg", "bing"} or type(max_results) is not int or not 1 <= max_results <= 50:
+            raise ValueError("invalid search parser request")
+        return await self._parse({"kind": "search", "html": html, "engine": engine, "max_results": max_results})
+
+    async def _parse(self, request):
         started = asyncio.get_running_loop().time()
         try:
-            result = await wait_for_owned(self._queued(html, url), self.timeout)
+            result = await wait_for_owned(self._queued(request), self.timeout)
         except asyncio.TimeoutError as exc:
-            raise ParseFailure("parse_deadline", "正文解析时间预算已用尽（含排队与进程启动）") from exc
+            raise ParseFailure("parse_deadline", "HTML 解析时间预算已用尽（含排队与进程启动）") from exc
         result["parse_info"] = {"mode": "subprocess", "elapsed_seconds": round(
             asyncio.get_running_loop().time() - started, 3)}
         return result
 
-    async def _queued(self, html, url):
+    async def _queued(self, request):
         async with self.slots:
-            return await self._run(html, url)
+            return await self._run(request)
 
-    async def _run(self, html, url):
+    @staticmethod
+    def _valid_result(result, request):
+        if not isinstance(result, dict) or type(result.get("ok")) is not bool:
+            return False
+        if request.get("kind") == "search":
+            items = result.get("items")
+            if (not isinstance(items, list) or len(items) > request["max_results"] or
+                    not isinstance(result.get("error"), str)):
+                return False
+            if not result["ok"]:
+                return not items and bool(result["error"])
+            return not result["error"] and all(
+                isinstance(item, dict) and all(isinstance(item.get(key), str)
+                    for key in ("url", "title", "snippet", "source")) and
+                item["source"] == request["engine"] for item in items)
+        return all(isinstance(result.get(key), str) for key in ("text", "_markdown", "title"))
+
+    async def _run(self, request):
         options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
         command = list(self.command)
         if os.name == "nt" and command[0] == sys.executable and sys.executable != sys._base_executable:
@@ -79,7 +104,7 @@ class ParsePolicy:
         try:
             proc = await asyncio.shield(spawn)
             self.active.add(proc)
-            payload = json.dumps({"html": html, "url": url}, ensure_ascii=False).encode("utf-8")
+            payload = json.dumps(request, ensure_ascii=False).encode("utf-8")
 
             async def send():
                 try:
@@ -98,25 +123,23 @@ class ParsePolicy:
                         return b"".join(chunks)
                     size += len(chunk)
                     if size > self.max_output_bytes:
-                        raise ParseFailure("parse_output_too_large", "正文解析结果超过传输上限")
+                        raise ParseFailure("parse_output_too_large", "HTML 解析结果超过传输上限")
                     chunks.append(chunk)
 
             io_tasks = [asyncio.create_task(send()), asyncio.create_task(receive())]
             _, output = await asyncio.gather(*io_tasks)
             code = await proc.wait()
             if code != 0:
-                raise ParseFailure("parse_worker_failed", "正文解析进程异常退出")
+                raise ParseFailure("parse_worker_failed", "HTML 解析进程异常退出")
             try:
                 result = json.loads(output)
-                if not isinstance(result, dict) or not all(
-                        isinstance(result.get(key), kind) for key, kind in (
-                            ("ok", bool), ("text", str), ("_markdown", str), ("title", str))):
+                if not self._valid_result(result, request):
                     raise ValueError("invalid parser result")
-            except (ValueError, UnicodeError) as exc:
-                raise ParseFailure("parse_worker_failed", "正文解析进程返回无效结果") from exc
+            except (ValueError, UnicodeError, RecursionError) as exc:
+                raise ParseFailure("parse_worker_failed", "HTML 解析进程返回无效结果") from exc
             return result
         except OSError as exc:
-            raise ParseFailure("parse_worker_failed", "无法启动或读取正文解析进程") from exc
+            raise ParseFailure("parse_worker_failed", "无法启动或读取 HTML 解析进程") from exc
         finally:
             finished = asyncio.create_task(cleanup())
             cancelled = False

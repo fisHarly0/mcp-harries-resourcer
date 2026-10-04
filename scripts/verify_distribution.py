@@ -42,6 +42,7 @@ def main():
         with zipfile.ZipFile(wheel) as archive:
             names = archive.namelist()
             assert "mcp_harries_resourcer/parse_worker.py" in names, names
+            assert "mcp_harries_resourcer/search_content.py" in names, names
             assert all(name.startswith(("mcp_harries_resourcer/", "mcp_harries_resourcer-")) for name in names), names
         with tarfile.open(sdist) as archive:
             names = archive.getnames()
@@ -58,6 +59,11 @@ def main():
         run(str(python), "-I", "-c", "import mcp_harries_resourcer as p; import sys; from pathlib import Path; "
             "from importlib.metadata import version; assert version('mcp-harries-resourcer') == p.__version__; "
             "assert Path(p.__file__).is_relative_to(Path(sys.prefix)), p.__file__", cwd=root, env=env)
+        # Both parser modes must work in the installed wheel from an unrelated cwd.
+        run(str(python), "-I", "-c", "import asyncio; from mcp_harries_resourcer.parse_policy import ParsePolicy; "
+            "p = ParsePolicy(); html = '<li class=\"b_algo\"><h2><a href=\"https://example.org\">Guide</a></h2></li>'; "
+            "r = asyncio.run(p.parse_search(html, 'bing', 1)); "
+            "assert r['ok'] and r['items'][0]['title'] == 'Guide' and not p.active, r", cwd=root, env=env)
         smoke = source / "scripts" / "installed_smoke.py"
         run(str(python), str(smoke), "--", str(cli), cwd=root, env=env)
         run(str(python), str(smoke), "--", str(python), "-m", "mcp_harries_resourcer", cwd=root, env=env)

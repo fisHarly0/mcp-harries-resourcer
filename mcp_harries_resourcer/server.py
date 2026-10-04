@@ -14,7 +14,6 @@
 """
 
 import asyncio
-import base64
 import hashlib
 import json
 import os
@@ -24,12 +23,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
-from urllib.parse import quote_plus, parse_qs, urlparse
+from urllib.parse import quote_plus
 
 import httpx
-from bs4 import BeautifulSoup
 from mcp.server.fastmcp import Context, FastMCP
 
+from .search_content import SearchEngineError, _parse_bing, _parse_ddg
 from .request_policy import RequestPolicy
 from .http_policy import HTTPPolicyError
 from .batch_budget import BatchBudget, Unfinished
@@ -71,84 +70,6 @@ UA = (
 
 # ───────────────────────── helpers ─────────────────────────
 
-def _clean_ddg_url(href: str) -> str:
-    if not href:
-        return ""
-    if href.startswith("//"):
-        href = "https:" + href
-    if "uddg=" in href:
-        q = parse_qs(urlparse(href).query)
-        if "uddg" in q:
-            return q["uddg"][0]
-    return href
-
-
-def _search_text(element) -> str:
-    # Preserve spaces around inline highlights without splitting identifiers or
-    # adding spaces before punctuation. HTML line breaks still separate words.
-    for br in element.find_all("br"):
-        br.replace_with(" ")
-    return " ".join(element.get_text().split())
-
-
-def _parse_ddg(html: str, max_results: int) -> list[dict]:
-    soup = BeautifulSoup(html, "html.parser")
-    out = []
-    for div in soup.select("div.result"):
-        a = div.select_one("a.result__a")
-        if not a:
-            continue
-        url = _clean_ddg_url(a.get("href", ""))
-        title = _search_text(a)
-        snip = div.select_one(".result__snippet")
-        snippet = _search_text(snip) if snip else ""
-        if urlparse(url).scheme in {"http", "https"} and title and not any(it["url"] == url for it in out):
-            out.append({"url": url, "title": title, "snippet": snippet, "source": "ddg"})
-        if len(out) >= max_results:
-            break
-    return out
-
-
-def _clean_bing_url(href: str) -> str:
-    """Bing 把真实 URL 包在 /ck/a?...&u=a1<base64>&... 里，剥出来。"""
-    if not href:
-        return ""
-    if "/ck/a" in href:
-        m = re.search(r"[?&]u=a1([^&]+)", href)
-        if m:
-            payload = m.group(1)
-            # urlsafe-base64，需补齐 padding
-            payload += "=" * (-len(payload) % 4)
-            try:
-                return base64.urlsafe_b64decode(payload).decode("utf-8", errors="ignore")
-            except Exception:
-                pass
-    return href
-
-
-def _parse_bing(html: str, max_results: int) -> list[dict]:
-    soup = BeautifulSoup(html, "html.parser")
-    out = []
-    for li in soup.select("li.b_algo"):
-        h2 = li.find("h2")
-        a = h2.find("a") if h2 else None
-        if not a:
-            continue
-        url = _clean_bing_url(a.get("href", ""))
-        title = _search_text(a)
-        p = li.select_one("p, .b_caption p")
-        snippet = _search_text(p) if p else ""
-        if urlparse(url).scheme in {"http", "https"} and title and not any(it["url"] == url for it in out):
-            out.append({"url": url, "title": title, "snippet": snippet, "source": "bing"})
-        if len(out) >= max_results:
-            break
-    return out
-
-
-class SearchEngineError(Exception):
-    """An engine failed; this is different from a valid empty result page."""
-
-
 @dataclass
 class SearchOutcome:
     items: list[dict] = field(default_factory=list)
@@ -170,33 +91,23 @@ class SearchOutcome:
         return "filtered_empty" if self.filtered_count else "no_results"
 
 
-def _parse_search_response(response: httpx.Response, engine: str, max_results: int) -> list[dict]:
+async def _parse_search_response(response: httpx.Response, engine: str, max_results: int) -> list[dict]:
     if response.status_code == 429:
         raise SearchEngineError("限流（HTTP 429）")
     if response.status_code in {202, 403}:
         raise SearchEngineError(f"访问受限或需要验证（HTTP {response.status_code}）")
     response.raise_for_status()
-    soup = BeautifulSoup(response.text, "html.parser")
-    if soup.select_one(".anomaly-modal, #challenge-form, #b_captcha, .g-recaptcha, #captcha"):
-        raise SearchEngineError("访问受限或需要验证码")
-    parser = _parse_ddg if engine == "ddg" else _parse_bing
-    try:
-        items = parser(response.text, max_results)
-    except (TypeError, ValueError) as exc:
-        raise SearchEngineError("解析失败：结果页面包含无效数据") from exc
-    if items:
-        return items
-    empty_selector = ".no-results, .result--no-result, .no-results__message" if engine == "ddg" else "#b_results .b_no"
-    if soup.select_one(empty_selector):
-        return []
-    raise SearchEngineError("解析失败：未识别结果或无结果标记，可能是页面改版或拦截")
+    result = await PARSER.parse_search(response.text, engine, max_results)
+    if not result["ok"]:
+        raise SearchEngineError(result["error"])
+    return result["items"]
 
 
 async def _ddg(client: httpx.AsyncClient, query: str, max_results: int) -> list[dict]:
     url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
     response = await NETWORK.http.request(client, "POST", url, headers={"User-Agent": UA},
                                           pace=lambda: NETWORK.wait_for_search("ddg"))
-    return _parse_search_response(response, "ddg", max_results)
+    return await _parse_search_response(response, "ddg", max_results)
 
 
 def _has_chinese(s: str) -> bool:
@@ -217,7 +128,7 @@ async def _bing(client: httpx.AsyncClient, query: str, max_results: int, mkt: st
         response = await NETWORK.http.request(client, "GET", canonical_url,
                                               headers={"User-Agent": UA, "Accept-Language": accept_lang},
                                               pace=lambda: NETWORK.wait_for_search("bing"))
-    return _parse_search_response(response, "bing", max_results)
+    return await _parse_search_response(response, "bing", max_results)
 
 
 async def _search(query: str, max_results: int, strategy: str = "fallback",
@@ -261,6 +172,7 @@ async def _search(query: str, max_results: int, strategy: str = "fallback",
 
         async def attempt(name, fetch):
             failure = ""
+            error_code = None
             try:
                 res = await wait_for_owned(fetch(), NETWORK.http.total_timeout)
                 reply = res if isinstance(res, SearXNGReply) else None
@@ -281,6 +193,8 @@ async def _search(query: str, max_results: int, strategy: str = "fallback",
                 return selected, metadata, failure
             except (httpx.TimeoutException, asyncio.TimeoutError):
                 failure = "请求超时"
+            except ParseFailure as exc:
+                failure, error_code = str(exc), exc.code
             except HTTPPolicyError as exc:
                 failure = str(exc)
             except httpx.HTTPStatusError as exc:
@@ -289,7 +203,10 @@ async def _search(query: str, max_results: int, strategy: str = "fallback",
                 failure = "网络连接失败"
             except (SearchEngineError, SearXNGError) as exc:
                 failure = str(exc)
-            return [], {"engine": name, "status": "failed", "error": failure}, f"{name}：{failure}"
+            metadata = {"engine": name, "status": "failed", "error": failure}
+            if error_code:
+                metadata["error_code"] = error_code
+            return [], metadata, f"{name}：{failure}"
 
         groups = [[] for _ in engines]
         failures = ["" for _ in engines]

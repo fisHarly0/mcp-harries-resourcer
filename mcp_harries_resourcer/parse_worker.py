@@ -13,9 +13,17 @@ if not __package__:
 
 def main():
     with contextlib.redirect_stdout(sys.stderr):
-        from .page_content import extract_page
         request = json.loads(sys.stdin.buffer.read())
-        result = extract_page(request["html"], request["url"])
+        if request.get("kind") == "search":
+            from .search_content import SearchEngineError, parse_search
+            try:
+                items = parse_search(request["html"], request["engine"], request["max_results"])
+                result = {"ok": True, "items": items, "error": ""}
+            except SearchEngineError as exc:
+                result = {"ok": False, "items": [], "error": str(exc)}
+        else:
+            from .page_content import extract_page
+            result = extract_page(request["html"], request["url"])
         output = json.dumps(result, ensure_ascii=False).encode("utf-8")
     sys.stdout.buffer.write(output)
 

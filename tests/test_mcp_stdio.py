@@ -147,6 +147,60 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
                         self.assertFalse(recovered["cached"])
             await asyncio.wait_for(workflow(), 40)
 
+    async def test_search_parser_cleanup_on_mcp_cancel_and_partial_merge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "started"
+            params = StdioServerParameters(command=sys.executable,
+                args=[str(Path(__file__).parent / "fixtures" / "parse_stdio.py")],
+                env={**os.environ, "TEST_PARSE_MARKER": str(marker), "TEST_SEARCH_PARSE": "1"})
+            async def workflow():
+                async with stdio_client(params) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        await session.list_tools()  # Warm SDK tool metadata before capturing the request id.
+                        async def call(name, progress=None, **arguments):
+                            result = await session.call_tool(name, arguments, progress_callback=progress)
+                            self.assertFalse(result.isError)
+                            return json.loads("\n".join(c.text for c in result.content if c.type == "text"))
+                        request_id = session._request_id
+                        notifications = []
+                        async def progress(value, total, message):
+                            notifications.append((value, total))
+                        request = asyncio.create_task(call("web_search", query="python", response_format="json", progress=progress))
+                        async def started():
+                            while not marker.exists():
+                                await asyncio.sleep(0.01)
+                        await asyncio.wait_for(started(), 10)
+                        state = await call("parser_state")
+                        self.assertEqual(state["active"], 1)
+                        await session.send_notification(types.ClientNotification(types.CancelledNotification(
+                            params=types.CancelledNotificationParams(requestId=request_id))))
+                        with self.assertRaises(McpError):
+                            await request
+                        async def cleaned():
+                            while True:
+                                state = await call("parser_state")
+                                if not state["active"] and not state["inflight"]:
+                                    return state
+                                await asyncio.sleep(0.01)
+                        self.assertEqual((await asyncio.wait_for(cleaned(), 10))["cached"], 0)
+                        self.assertEqual(notifications, [(0, 1)])
+                        partial = await call("web_search_multi", queries=["python"], strategy="merge",
+                                             response_format="json", time_budget_seconds=2)
+                        self.assertTrue(partial["batch"]["deadline_exceeded"])
+                        self.assertFalse(partial["complete"])
+                        self.assertTrue(partial["results"])
+                        self.assertEqual(partial["results"][0]["title"], "Example guide")
+                        attempts = partial["queries"][0]["attempts"]
+                        self.assertEqual([a["status"] for a in attempts], ["deadline", "success"])
+                        self.assertEqual(await call("parser_state"), {"active": 0, "inflight": 0, "cached": 0})
+                        Path(str(marker) + ".release").touch()
+                        recovered = await call("web_search", query="python", response_format="json")
+                        self.assertTrue(recovered["ok"])
+                        self.assertTrue(recovered["complete"])
+                        self.assertEqual(recovered["results"][0]["title"], "Example guide")
+            await asyncio.wait_for(workflow(), 40)
+
     async def test_batch_partial_results_and_retry_over_mcp(self):
         counts = {}
         release = threading.Event()
@@ -328,13 +382,13 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(research["search_status"], "results")
                     self.assertEqual(research["pages"], [])
                     partial = await call("web_search_multi", queries=["budget"], strategy="merge",
-                                         include_domains=["python.org"], time_budget_seconds=0.2)
+                                         include_domains=["python.org"], time_budget_seconds=2)
                     self.assertEqual(len(partial["results"]), 1)
                     self.assertFalse(partial["complete"])
                     self.assertTrue(partial["batch"]["deadline_exceeded"])
                     self.assertEqual(partial["queries"][0]["attempts"][1]["status"], "deadline")
                     partial_research = await call("deep_research", query="budget", strategy="merge",
-                                                  include_domains=["python.org"], time_budget_seconds=0.2)
+                                                  include_domains=["python.org"], time_budget_seconds=2)
                     self.assertEqual(len(partial_research["results"]), 1)
                     self.assertFalse(partial_research["pages"][0]["started"])
                     self.assertEqual(partial_research["pages"][0]["error_code"], "batch_deadline")

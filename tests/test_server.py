@@ -28,7 +28,7 @@ def item(url="https://example.org/guide"):
     return {"url": url, "title": "Guide", "snippet": "A useful article.", "source": "ddg"}
 
 
-class ParserTests(unittest.TestCase):
+class ParserTests(unittest.IsolatedAsyncioTestCase):
     def test_ddg_urls_snippets_and_deduplication(self):
         items = server._parse_ddg(fixture("ddg_results.html"), 10)
         self.assertEqual(len(items), 2)
@@ -57,38 +57,38 @@ class ParserTests(unittest.TestCase):
                     self.assertEqual(result['title'], expected)
                     self.assertEqual(result['snippet'], 'Read this.')
 
-    def test_result_limit(self):
+    async def test_result_limit(self):
         for engine in ("ddg", "bing"):
             with self.subTest(engine=engine):
-                self.assertEqual(len(server._parse_search_response(response(fixture(f"{engine}_results.html")), engine, 1)), 1)
+                self.assertEqual(len(await server._parse_search_response(response(fixture(f"{engine}_results.html")), engine, 1)), 1)
 
-    def test_explicit_empty_pages(self):
+    async def test_explicit_empty_pages(self):
         for engine in ("ddg", "bing"):
             with self.subTest(engine=engine):
-                self.assertEqual(server._parse_search_response(response(fixture(f"{engine}_empty.html")), engine, 5), [])
+                self.assertEqual(await server._parse_search_response(response(fixture(f"{engine}_empty.html")), engine, 5), [])
 
-    def test_unrecognized_html_is_not_empty_results(self):
+    async def test_unrecognized_html_is_not_empty_results(self):
         for engine in ("ddg", "bing"):
             with self.subTest(engine=engine):
                 with self.assertRaisesRegex(server.SearchEngineError, "解析失败"):
-                    server._parse_search_response(response(fixture("layout_changed.html")), engine, 5)
+                    await server._parse_search_response(response(fixture("layout_changed.html")), engine, 5)
 
-    def test_rate_limit_is_reported(self):
+    async def test_rate_limit_is_reported(self):
         with self.assertRaisesRegex(server.SearchEngineError, "限流"):
-            server._parse_search_response(response(status=429), "ddg", 5)
+            await server._parse_search_response(response(status=429), "ddg", 5)
 
-    def test_challenge_is_reported(self):
+    async def test_challenge_is_reported(self):
         with self.assertRaisesRegex(server.SearchEngineError, "验证码"):
-            server._parse_search_response(response(fixture("ddg_challenge.html")), "ddg", 5)
+            await server._parse_search_response(response(fixture("ddg_challenge.html")), "ddg", 5)
 
-    def test_http_errors_are_not_empty_results(self):
+    async def test_http_errors_are_not_empty_results(self):
         with self.assertRaises(httpx.HTTPStatusError):
-            server._parse_search_response(response(status=503), "bing", 5)
+            await server._parse_search_response(response(status=503), "bing", 5)
 
-    def test_malformed_result_url_is_a_parse_failure(self):
+    async def test_malformed_result_url_is_a_parse_failure(self):
         html = '<div class="result"><a class="result__a" href="https://[bad">Broken</a></div>'
         with self.assertRaisesRegex(server.SearchEngineError, "解析失败"):
-            server._parse_search_response(response(html), "ddg", 5)
+            await server._parse_search_response(response(html), "ddg", 5)
 
 
 class SearchTests(unittest.IsolatedAsyncioTestCase):
