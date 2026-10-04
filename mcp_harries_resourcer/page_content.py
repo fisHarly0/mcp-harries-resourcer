@@ -8,6 +8,8 @@ from bs4 import BeautifulSoup
 import trafilatura
 from trafilatura.xml import xmltotxt
 
+from .table_content import normalize_selected_tables, prepare_tables, restore_nested_tables
+
 
 def safe_link(href: str, base_url: str) -> str | None:
     try:
@@ -103,6 +105,7 @@ def extract_markdown(html: str, final_url: str) -> dict:
         else:
             del anchor["href"]
 
+    relocated_tables = prepare_tables(soup)
     list_starts = {}
     for ordered in soup.find_all("ol", start=True):
         first = ordered.find("li", recursive=False)
@@ -139,6 +142,8 @@ def extract_markdown(html: str, final_url: str) -> dict:
         return {"markdown": "", "references": [], "references_truncated": False,
                 "structure": {"code_blocks": 0, "tables": 0, "links": 0}}
     body = deepcopy(doc.body)
+    restore_nested_tables(body, relocated_tables)
+    normalize_selected_tables(body)
     references, seen = [], set()
     for node in body.iter("ref"):
         target = safe_link(node.get("target", ""), base) if node.get("target") else None

@@ -344,10 +344,13 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
         state = {"version": "alpha", "requests": 0}
         article = (Path(__file__).parent / "fixtures" / "technical_article.html").read_text(encoding="utf-8")
         structured_article = (Path(__file__).parent / "fixtures" / "structured_article.html").read_text(encoding="utf-8")
+        merged_article = (Path(__file__).parent / "fixtures" / "merged_table_article.html").read_text(encoding="utf-8")
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 state["requests"] += 1
                 source = structured_article if state["version"] == "structured" else article
+                if state["version"] == "tables":
+                    source = merged_article
                 body = source.replace("Async worker guide", f"{state['version']} 中文资料测试").encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -429,6 +432,21 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(structured["structure"]["code_blocks"], 1)
                     self.assertTrue(tail["cached"])
                     self.assertEqual(state["requests"], 3)
+                    state["version"] = "tables"
+                    merged = await fetch(refresh=True, content_format="markdown", max_chars=0)
+                    self.assertTrue(merged["ok"])
+                    fragment = await fetch(content_format="markdown", max_chars=137)
+                    tail = await fetch(content_format="markdown", start_index=fragment["next_index"],
+                                       expected_content_id=merged["content_id"], max_chars=0)
+                    self.assertEqual(fragment["text"] + tail["text"], merged["text"])
+                    rendered = BeautifulSoup(MarkdownIt().enable("table").render(merged["text"]), "html.parser")
+                    matrix = [[c.get_text() for c in r.find_all(["th", "td"])] for r in rendered.find("table").find_all("tr")]
+                    self.assertEqual(matrix, [["Product", "Versions", ""], ["", "Minimum", "Maximum"],
+                                              ["Python", "3.10", "3.12"], ["", "3.13", "3.14"], ["Other", "1", "2"]])
+                    self.assertEqual(rendered.select_one("ol table tbody code").get_text(), "a | b")
+                    self.assertEqual(merged["structure"]["tables"], 2)
+                    self.assertTrue(tail["cached"])
+                    self.assertEqual(state["requests"], 4)
         await asyncio.wait_for(workflow(), timeout=30)
 
     async def test_initialize_list_save_and_search(self):
