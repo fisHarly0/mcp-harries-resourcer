@@ -126,3 +126,32 @@ def content_warnings(text: str, title: str) -> list[str]:
     if not title:
         warnings.append("missing_title")
     return warnings
+
+
+def extract_page(html: str, url: str) -> dict:
+    """Extract both formats together; called only inside the parser worker in production."""
+    try:
+        text = trafilatura.extract(html, url=url, include_comments=False,
+                                   include_tables=True, favor_recall=True) or ""
+    except Exception:
+        text, text_error = "", "正文解析失败"
+    else:
+        text_error = "" if text else "无法提取正文"
+    try:
+        formatted = extract_markdown(html, url)
+        markdown_error = "" if formatted["markdown"] else "无法提取 Markdown 正文"
+    except Exception:
+        formatted = {"markdown": "", "references": [], "references_truncated": False, "structure": {}}
+        markdown_error = "Markdown 正文解析失败"
+    title = ""
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        if soup.title and soup.title.string:
+            title = soup.title.string.strip()
+    except Exception:
+        pass
+    return {"ok": bool(text or formatted["markdown"]), "error": text_error,
+            "title": title, "text": text, "_markdown": formatted["markdown"],
+            "_markdown_error": markdown_error, "references": formatted["references"],
+            "references_truncated": formatted["references_truncated"], "structure": formatted["structure"],
+            "extractor": "trafilatura", "extractor_version": trafilatura.__version__}

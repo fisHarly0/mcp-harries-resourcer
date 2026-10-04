@@ -1,7 +1,7 @@
 import asyncio
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
@@ -267,7 +267,8 @@ class FetchIntegrationTests(unittest.IsolatedAsyncioTestCase):
             requests.append(str(request.url))
             return httpx.Response(200, text="<html><title>Guide</title></html>")
         async with REAL_CLIENT(transport=httpx.MockTransport(handler)) as client:
-            with patch.object(server.trafilatura, "extract", return_value="Complete article body"):
+            with patch.object(server.PARSER, "parse", AsyncMock(return_value={
+                    "ok": True, "text": "Complete article body", "title": "Guide", "error": ""})):
                 short = await server._fetch_one(client, "https://example.org/a", 4)
                 full = await server._fetch_one(client, "https://example.org/a", 0)
         self.assertEqual(len(requests), 1)
@@ -285,7 +286,8 @@ class FetchIntegrationTests(unittest.IsolatedAsyncioTestCase):
         def client_factory(**kwargs):
             return REAL_CLIENT(transport=httpx.MockTransport(handler))
         with patch.object(server.httpx, "AsyncClient", side_effect=client_factory):
-            with patch.object(server.trafilatura, "extract", return_value="Shared cached article"):
+            with patch.object(server.PARSER, "parse", AsyncMock(return_value={
+                    "ok": True, "text": "Shared cached article", "title": "Guide", "error": ""})):
                 first = await server.fetch_page("https://example.org/a")
                 second = await server.fetch_pages(["https://example.org/a"])
         self.assertEqual(len(requests), 1)

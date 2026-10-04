@@ -194,7 +194,7 @@ class ResearchTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_fetch_parser_failure_is_a_result(self):
         async with REAL_CLIENT(transport=httpx.MockTransport(lambda r: httpx.Response(200, text="<html>bad</html>"))) as client:
-            with patch.object(server.trafilatura, "extract", side_effect=ValueError("parser failed")):
+            with patch.object(server.PARSER, "parse", AsyncMock(side_effect=server.ParseFailure("parse_worker_failed", "正文解析失败"))):
                 result = await server._fetch_one(client, "https://example.org", 100)
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"], "正文解析失败")

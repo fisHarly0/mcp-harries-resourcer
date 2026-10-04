@@ -38,6 +38,7 @@
 | `references` / `references_truncated` | 完整 Markdown 正文中的 HTTP(S) 引用索引 / 索引是否超出 100 条上限 |
 | `structure` | 提取到的 Markdown 全文的代码块、表格、唯一链接数量；不是当前片段的数量 |
 | `extractor` / `extractor_version` | 正文提取器及版本，方便复现差异 |
+| `parse_info` | 解析模式与耗时（含排队、启动、结果传输和回收）；缓存命中时保留原记录 |
 | `warnings` | 简易异常提示，如短正文、替换字符、缺少标题；不代表来源质量评分 |
 | `fetched_at` | 抓取并提取完成的 UTC 时间 |
 | `content_id` | 完整正文的版本哈希 |

@@ -27,7 +27,8 @@ class ReadingTests(unittest.IsolatedAsyncioTestCase):
         patches = [
             patch.object(server, "NETWORK", RequestPolicy(search_rpm=0, fetch_rpm=0, http_policy=HTTPPolicy(retries=0))),
             patch.object(server.httpx, "AsyncClient", side_effect=client_factory),
-            patch.object(server.trafilatura, "extract", side_effect=lambda *a, **k: self.article),
+            patch.object(server.PARSER, "parse", AsyncMock(side_effect=lambda *a, **k: {
+                "ok": True, "text": self.article, "title": "Guide", "error": ""})),
         ]
         for p in patches:
             p.start()

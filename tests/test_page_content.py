@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 from page_content import content_warnings, extract_markdown, safe_link
+import page_content
 from request_policy import PageCache, RequestPolicy
 import server
 
@@ -100,6 +101,7 @@ class MarkdownToolTests(unittest.IsolatedAsyncioTestCase):
                 return httpx.Response(302, headers={"Location": FINAL_URL})
             return httpx.Response(200, text=self.html)
         patches = [
+            patch.object(server, "PARSER", server.ParsePolicy()),
             patch.object(server, "NETWORK", RequestPolicy(fetch_rpm=0)),
             patch.object(server.httpx, "AsyncClient", side_effect=lambda **kw: REAL_CLIENT(
                 transport=httpx.MockTransport(respond), trust_env=False)),
@@ -167,7 +169,12 @@ class MarkdownToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([v["content_format"] for v in values], ["text", "markdown"])
 
     async def test_markdown_failure_does_not_silently_return_plain_text(self):
-        with patch.object(server, "extract_markdown", side_effect=ValueError("bad format")):
+        # Failure of one format is a pure extraction contract; process transport
+        # and crashes are covered separately by the parser policy tests.
+        async def parse(html, url):
+            with patch.object(page_content, "extract_markdown", side_effect=ValueError("bad format")):
+                return page_content.extract_page(html, url)
+        with patch.object(server.PARSER, "parse", side_effect=parse):
             plain = await self.fetch()
             md = await self.fetch(content_format="markdown")
         self.assertTrue(plain["ok"])

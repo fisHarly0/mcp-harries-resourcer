@@ -12,9 +12,55 @@ import unittest
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp import types
+from mcp.shared.exceptions import McpError
 
 
 class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
+    async def test_parser_cleanup_on_mcp_cancel_and_batch_deadline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "started"
+            params = StdioServerParameters(command=sys.executable,
+                args=[str(Path(__file__).parent / "fixtures" / "parse_stdio.py")],
+                env={**os.environ, "TEST_PARSE_MARKER": str(marker)})
+            async def workflow():
+                async with stdio_client(params) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        await session.list_tools()  # Warm SDK tool metadata before capturing the request id.
+                        async def call(name, **arguments):
+                            result = await session.call_tool(name, arguments)
+                            self.assertFalse(result.isError)
+                            return json.loads("\n".join(c.text for c in result.content if c.type == "text"))
+                        request_id = session._request_id
+                        request = asyncio.create_task(call("fetch_page", url="https://example.org/slow", response_format="json"))
+                        async def started():
+                            while not marker.exists():
+                                await asyncio.sleep(0.01)
+                        await asyncio.wait_for(started(), 10)
+                        state = await call("parser_state")
+                        self.assertEqual(state["active"], 1)
+                        await session.send_notification(types.ClientNotification(types.CancelledNotification(
+                            params=types.CancelledNotificationParams(requestId=request_id))))
+                        with self.assertRaises(McpError):
+                            await request
+                        async def cleaned():
+                            while True:
+                                state = await call("parser_state")
+                                if not state["active"] and not state["inflight"]:
+                                    return state
+                                await asyncio.sleep(0.01)
+                        self.assertEqual((await asyncio.wait_for(cleaned(), 10))["cached"], 0)
+                        partial = await call("fetch_pages", urls=["https://example.org/slow"],
+                                             response_format="json", time_budget_seconds=1)
+                        self.assertEqual(partial["pages"][0]["error_code"], "batch_deadline")
+                        self.assertEqual(await call("parser_state"), {"active": 0, "inflight": 0, "cached": 0})
+                        Path(str(marker) + ".release").touch()
+                        recovered = await call("fetch_page", url="https://example.org/slow", response_format="json")
+                        self.assertTrue(recovered["ok"])
+                        self.assertFalse(recovered["cached"])
+            await asyncio.wait_for(workflow(), 40)
+
     async def test_batch_partial_results_and_retry_over_mcp(self):
         counts = {}
         release = threading.Event()
@@ -90,11 +136,13 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
                 if self.path == "/retry" and counts[self.path] == 1:
                     self.send_response(503)
                     self.send_header("Retry-After", "0")
+                    self.send_header("Content-Length", "0")
                     self.end_headers()
                     return
                 if self.path == "/cooldown":
                     self.send_response(429)
                     self.send_header("Retry-After", "60")
+                    self.send_header("Content-Length", "0")
                     self.end_headers()
                     return
                 self.send_response(200)
@@ -103,6 +151,8 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
                     self.send_header("Content-Length", "1000000")
                 if self.path == "/gzip":
                     self.send_header("Content-Encoding", "gzip")
+                if self.path not in {"/slow", "/large", "/gzip"}:
+                    self.send_header("Content-Length", str(len(article)))
                 self.end_headers()
                 try:
                     if self.path == "/slow":

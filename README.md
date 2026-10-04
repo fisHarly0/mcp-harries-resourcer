@@ -28,6 +28,8 @@ Resourcer 是一个轻量 MCP 资料工具，把网页搜索、正文提取和�
 
 阅读技术文档时可用 `content_format="markdown"`，保留提取到的标题、代码块、表格和链接。JSON 还提供正文引用索引、结构统计和简易异常提示；两种正文格式共享同一次下载，使用各自的版本标识。示例与限制见 [Markdown 与引用](docs/content.md)。
 
+正文在独立 Python 进程中解析，默认最多同时解析 2 页、每页解析预算 20 秒（含排队与启动）。超时或取消会终止并回收对应解析进程，复杂正文不会一直占住主事件循环。进程启动和内存开销、时间边界见 [解析隔离](docs/parsing.md)。
+
 搜索支持包含／排除域名，并逐条校验返回链接。需要扩大来源覆盖时，可选择 `strategy="merge"` 同时查询两个引擎；去重后保留各引擎的原始链接和排名。搜索工具也支持 JSON 输出。
 
 ```mermaid
@@ -127,6 +129,8 @@ claude mcp add --scope user resourcer -e RESOURCER_RESEARCH_ROOT=D:\research -- 
 | `RESOURCER_HTTP_RETRIES` | `1` | 可重试 HTTP 状态或网络故障最多追加尝试次数，范围 0–3 |
 | `RESOURCER_REQUEST_TIMEOUT_SECONDS` | `60` | 每个引擎尝试／单页抓取的异步时间预算，含重试等待；范围 1–300 秒 |
 | `RESOURCER_RESPONSE_MAX_BYTES` | `8388608` | 单个响应的传输数据及解压后数据上限，默认各 8 MiB；范围 1024–67108864 字节 |
+| `RESOURCER_PARSE_CONCURRENCY` | `2` | 同时运行的正文解析进程数，范围 1–5 |
+| `RESOURCER_PARSE_TIMEOUT_SECONDS` | `20` | 每页解析预算，包含解析排队、进程启动与结果传输，范围 1–120 秒 |
 
 速率值设为 `0` 可关闭对应限速；任一缓存值设为 `0` 可关闭跨调用缓存。非法值会在 stderr 记录警告并使用默认值。设置修改后需要重新连接服务。
 
@@ -183,6 +187,8 @@ mcp-harries-resourcer/
 ├── batch_budget.py        # 整批截止时间、有限工作任务和部分结果
 ├── search_results.py      # 域名筛选、URL 去重与来源合并
 ├── page_content.py        # Markdown、代码保留、引用索引和内容提示
+├── parse_policy.py        # 解析并发、超时、取消与子进程回收
+├── parse_worker.py        # 单页正文提取的独立进程入口
 ├── requirements.txt       # Python 依赖
 ├── docs/                  # 使用示例、项目对比与验证记录
 ├── tests/                 # 回归测试与固定 HTML 样本

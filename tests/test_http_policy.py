@@ -295,7 +295,7 @@ class FetchBudgetTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_oversize_is_reported_without_extracting_or_caching_partial_body(self):
         policy = RequestPolicy(fetch_rpm=0, http_policy=HTTPPolicy(max_bytes=10))
-        with patch.object(server, "NETWORK", policy), patch.object(server.trafilatura, "extract") as extract:
+        with patch.object(server, "NETWORK", policy), patch.object(server.PARSER, "parse") as extract:
             async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, text="a" * 20))) as client:
                 result = await server._fetch_one(client, "https://example.org", 5)
         self.assertEqual(result["error_code"], "response_too_large")

@@ -29,7 +29,7 @@ JSON 中的 `references` 是 Markdown 全文的唯一链接索引，每项含 `u
 
 `warnings` 是简单提示：`short_content` 表示少于 200 个去掉首尾空白后的字符，`replacement_characters` 表示含 Unicode 替换字符，`missing_title` 表示缺少页面标题。纯文本成功而 Markdown 失败时还会有 `markdown_unavailable`。这些提示不能判断事实真伪，也不能保证没有遗漏正文。
 
-只处理静态 HTML，不执行 JavaScript，也不读取登录后的页面或 PDF。正文选择、复杂表格、嵌套列表布局仍可能有损失；只恢复被提取器保留下来的代码。Markdown 适合阅读和整理，不承诺完整复制原网页布局。同步解析仍受 [网络说明](network.md) 中的 CPU 限制约束。
+只处理静态 HTML，不执行 JavaScript，也不读取登录后的页面或 PDF。正文选择、复杂表格、嵌套列表布局仍可能有损失；只恢复被提取器保留下来的代码。Markdown 适合阅读和整理，不承诺完整复制原网页布局。正文提取在 [独立解析进程](parsing.md) 中执行，超时或取消时会终止该进程。
 
 实现基于 [Trafilatura 的提取与渲染接口](https://trafilatura.readthedocs.io/en/latest/corefunctions.html)，依赖范围为 `trafilatura>=2.3.0,<3`。已有安装需更新 `requirements.txt` 中的依赖并重新连接 MCP 服务。
 

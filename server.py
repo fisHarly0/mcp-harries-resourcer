@@ -26,14 +26,14 @@ from typing import Literal
 from urllib.parse import quote_plus, parse_qs, urlparse
 
 import httpx
-import trafilatura
 from bs4 import BeautifulSoup
 from mcp.server.fastmcp import FastMCP
 
 from request_policy import RequestPolicy
 from http_policy import HTTPPolicyError
 from batch_budget import BatchBudget, Unfinished
-from page_content import content_warnings, extract_markdown
+from page_content import content_warnings
+from parse_policy import ParseFailure, ParsePolicy
 from search_results import merge_results, normalize_domains, select_results, url_identity
 
 mcp = FastMCP("resourcer")
@@ -41,6 +41,7 @@ mcp = FastMCP("resourcer")
 DEFAULT_TIMEOUT = 25.0
 FETCH_CONCURRENCY = 5
 NETWORK = RequestPolicy.from_env()
+PARSER = ParsePolicy.from_env()
 RESEARCH_ROOT = Path(
     os.environ.get("RESOURCER_RESEARCH_ROOT", str(Path.home() / "research"))
 )
@@ -437,44 +438,21 @@ async def _fetch_uncached(client: httpx.AsyncClient, url: str) -> dict:
         return {"url": url, "ok": False, "error": str(e), "error_code": e.code,
                 "retry_after_seconds": e.retry_after_seconds, "title": "", "text": ""}
     except Exception as e:
-        return {"url": url, "ok": False, "error": str(e), "title": "", "text": ""}
+        return {"url": url, "ok": False, "error": str(e) or type(e).__name__, "title": "", "text": ""}
     if r.status_code != 200:
         return {"url": url, "ok": False, "error": f"HTTP {r.status_code}", "error_code": "http_status",
                 "request_info": r.extensions.get("resourcer", {}), "title": "", "text": ""}
 
     try:
-        text = trafilatura.extract(
-            r.text, url=str(r.url),
-            include_comments=False, include_tables=True, favor_recall=True,
-        ) or ""
-    except Exception:
-        text = ""
-        text_error = "正文解析失败"
-    else:
-        text_error = "" if text else "无法提取正文"
-    try:
-        formatted = extract_markdown(r.text, str(r.url))
-        markdown_error = "" if formatted["markdown"] else "无法提取 Markdown 正文"
-    except Exception:
-        formatted = {"markdown": "", "references": [], "references_truncated": False, "structure": {}}
-        markdown_error = "Markdown 正文解析失败"
-    title = ""
-    try:
-        soup = BeautifulSoup(r.text, "html.parser")
-        if soup.title and soup.title.string:
-            title = soup.title.string.strip()
-    except Exception:
-        pass
-
+        parsed = await PARSER.parse(r.text, str(r.url))
+    except ParseFailure as exc:
+        return {"url": url, "ok": False, "error": str(exc), "error_code": exc.code,
+                "title": "", "text": "", "final_url": str(r.url),
+                "request_info": r.extensions.get("resourcer", {})}
     return {
-        "url": url, "ok": bool(text or formatted["markdown"]), "error": text_error,
-        "title": title, "text": text,
-        "_markdown": formatted["markdown"], "_markdown_error": markdown_error,
-        "references": formatted["references"], "references_truncated": formatted["references_truncated"],
-        "structure": formatted["structure"], "extractor": "trafilatura", "extractor_version": trafilatura.__version__,
+        **parsed, "url": url,
         "final_url": str(r.url),
         "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "content_id": hashlib.sha256(text.encode("utf-8")).hexdigest(),
         "request_info": r.extensions.get("resourcer", {}),
     }
 
