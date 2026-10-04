@@ -75,6 +75,10 @@ class PageCache:
         self.entries.move_to_end(url)
         return {**entry.result, "cached": True, "cache_age_seconds": int(self.clock() - entry.created_at)}
 
+    def invalidate(self, url):
+        if url in self.entries:
+            self._drop(url)
+
     def put(self, url, result):
         if not result.get("ok") or not self.ttl or not self.max_entries or not self.max_bytes:
             return
@@ -114,7 +118,11 @@ class RequestPolicy:
     async def wait_for_search(self, engine):
         await self.search_pacers[engine].wait()
 
-    async def fetch(self, url, loader):
+    async def fetch(self, url, loader, *, refresh=False):
+        if refresh:
+            # Discard a completed snapshot once. An in-progress download can still
+            # be shared, so concurrent refreshes don't duplicate network traffic.
+            self.cache.invalidate(url)
         while True:
             cached = self.cache.get(url)
             if cached is not None:

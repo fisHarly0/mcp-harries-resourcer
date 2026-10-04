@@ -15,12 +15,14 @@
 
 import asyncio
 import base64
+import hashlib
 import json
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote_plus, parse_qs, urlparse
 
 import httpx
@@ -233,12 +235,44 @@ def _format_results(query: str, items: list[dict]) -> str:
     return "\n".join(lines)
 
 
-async def _fetch_one(client: httpx.AsyncClient, url: str, max_chars: int) -> dict:
-    result = await NETWORK.fetch(url, lambda: _fetch_uncached(client, url))
-    result["truncated"] = max_chars > 0 and len(result["text"]) > max_chars
-    if result["truncated"]:
-        result["text"] = result["text"][:max_chars]
-    return result
+def _slice_page(result: dict, start_index: int, limit: int | None) -> dict:
+    """Slice by Unicode code points; None means unlimited, zero means no body."""
+    text = result["text"]
+    total = len(text)
+    start = min(start_index, total)
+    end = total if limit is None else min(total, start + limit)
+    return {
+        **result, "text": text[start:end], "total_chars": total,
+        "start_index": start, "end_index": end,
+        "next_index": end if end < total else None,
+        "truncated": end < total,
+    }
+
+
+async def _fetch_one(client: httpx.AsyncClient, url: str, max_chars: int,
+                     start_index: int = 0, refresh: bool = False) -> dict:
+    if max_chars < 0 or start_index < 0:
+        raise ValueError("max_chars 和 start_index 必须是非负整数")
+    result = await NETWORK.fetch(url, lambda: _fetch_uncached(client, url), refresh=refresh)
+    return _slice_page(result, start_index, max_chars or None)
+
+
+def _page_note(result: dict) -> str:
+    if "total_chars" not in result:
+        return ""
+    note = f"\n\n_正文范围 [{result['start_index']}, {result['end_index']}) / 共 {result['total_chars']} 字符。_"
+    if result["next_index"] is not None:
+        version = f", expected_content_id={json.dumps(result['content_id'])}" if result.get("content_id") else ""
+        note += f"\n继续读取：fetch_page(url={json.dumps(result['url'], ensure_ascii=False)}, start_index={result['next_index']}{version})"
+    else:
+        note += "\n_已到正文末尾。_"
+    return note
+
+
+def _tool_error(message: str, response_format: str) -> str:
+    if response_format == "json":
+        return json.dumps({"ok": False, "error": message}, ensure_ascii=False)
+    return message
 
 
 def _cache_note(result: dict) -> str:
@@ -273,6 +307,9 @@ async def _fetch_uncached(client: httpx.AsyncClient, url: str) -> dict:
     return {
         "url": url, "ok": bool(text), "error": "" if text else "无法提取正文",
         "title": title, "text": text,
+        "final_url": str(r.url),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "content_id": hashlib.sha256(text.encode("utf-8")).hexdigest(),
     }
 
 
@@ -350,50 +387,74 @@ async def search_chinese(query: str, site: str = "zhihu", max_results: int = 10)
 # ───────────────────────── tools: fetch ─────────────────────────
 
 @mcp.tool()
-async def fetch_page(url: str, max_chars: int = 50000) -> str:
-    """抓取网页并提取正文（去广告/导航/页脚）。
+async def fetch_page(
+    url: str, max_chars: int = 50000, start_index: int = 0,
+    refresh: bool = False, response_format: Literal["text", "json"] = "text",
+    expected_content_id: str = "",
+) -> str:
+    """提取网页正文，支持分页续读、单次刷新及 JSON 元数据。
 
     Args:
         url: 目标 URL
-        max_chars: 最长字符数；0 = 不截断
+        max_chars: 本次正文最多字符数；0 = 从起点读到末尾
+        start_index: 正文字符偏移，从 0 开始；续读使用上次返回的 next_index
+        refresh: 跳过已完成缓存；仍复用同 URL 正在进行的抓取
+        response_format: text 返回可读文本；json 返回可解析 JSON 字符串
+        expected_content_id: 可选的上次正文版本；不匹配时返回错误，防止续读混入更新后的正文
     """
+    if max_chars < 0 or start_index < 0:
+        return _tool_error("max_chars 和 start_index 必须是非负整数", response_format)
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as c:
-        res = await _fetch_one(c, url, max_chars)
+        res = await _fetch_one(c, url, max_chars, start_index, refresh)
+    if res["ok"] and expected_content_id and res.get("content_id") != expected_content_id:
+        res = {**res, "ok": False, "text": "", "error": "正文版本已变化，请从 start_index=0 重新读取"}
+    if response_format == "json":
+        return json.dumps(res, ensure_ascii=False)
     if not res["ok"]:
         return f"抓取失败 ({res['error']})：{url}"
     head = f"# {res['title'] or url}\n<{url}>\n"
     tail = f"\n\n…（已截断到 {max_chars} 字符）" if res["truncated"] else ""
-    return head + "\n" + res["text"] + tail + _cache_note(res)
+    return head + "\n" + res["text"] + tail + _page_note(res) + _cache_note(res)
 
 
 @mcp.tool()
-async def fetch_pages(urls: list[str], max_chars: int = 30000) -> str:
+async def fetch_pages(urls: list[str], max_chars: int = 30000,
+                      refresh: bool = False, response_format: Literal["text", "json"] = "text") -> str:
     """批量抓取正文；进程内最多 5 路网络抓取，共享限速与短时缓存。
 
     Args:
         urls: URL 列表
         max_chars: 每篇最长字符数；0 = 不截断
+        refresh: 跳过已完成缓存
+        response_format: text 或 json；JSON 中每页的 next_index 可传给 fetch_page 续读
     """
     if not urls:
-        return "urls 不能为空"
+        return _tool_error("urls 不能为空", response_format)
+    if max_chars < 0:
+        return _tool_error("max_chars 必须是非负整数", response_format)
 
     sem = asyncio.Semaphore(FETCH_CONCURRENCY)
 
     async def _bound_fetch(client, u):
         async with sem:
-            return await _fetch_one(client, u, max_chars)
+            return await _fetch_one(client, u, max_chars, refresh=refresh)
 
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as c:
-        results = await asyncio.gather(*[_bound_fetch(c, u) for u in urls])
+        unique_urls = list(dict.fromkeys(urls))
+        unique_results = await asyncio.gather(*[_bound_fetch(c, u) for u in unique_urls])
+    by_url = dict(zip(unique_urls, unique_results))
+    results = [dict(by_url[url]) for url in urls]
 
     ok = sum(1 for r in results if r["ok"])
+    if response_format == "json":
+        return json.dumps({"ok": ok == len(results), "successful": ok, "requested": len(urls), "pages": results}, ensure_ascii=False)
     blocks = [f"# 批量抓取（{ok}/{len(urls)} 成功）"]
     for r in results:
         if not r["ok"]:
             blocks.append(f"\n---\n## ❌ {r['url']}\n{r['error']}")
         else:
             tail = f"\n\n…（已截断到 {max_chars} 字符）" if r["truncated"] else ""
-            blocks.append(f"\n---\n## {r['title'] or r['url']}\n<{r['url']}>\n\n{r['text']}{tail}" + _cache_note(r))
+            blocks.append(f"\n---\n## {r['title'] or r['url']}\n<{r['url']}>\n\n{r['text']}{tail}" + _page_note(r) + _cache_note(r))
     return "\n".join(blocks)
 
 
@@ -405,6 +466,8 @@ async def deep_research(
     num_results: int = 10,
     fetch_top_n: int = 6,
     max_chars_each: int = 20000,
+    max_total_chars: int = 60000,
+    response_format: Literal["text", "json"] = "text",
 ) -> str:
     """搜索并抓取前 N 条正文，返回资料包供调用方总结；不自动写文件。
 
@@ -413,10 +476,20 @@ async def deep_research(
         num_results: 搜索结果数
         fetch_top_n: 抓取前几条的正文（≤ num_results）
         max_chars_each: 每篇正文截断长度；0 = 不截断
+        max_total_chars: 本次返回的正文总字符预算；默认 60000，0 = 不限制。不含标题、索引和诊断
+        response_format: text 或 json；JSON 保留来源、分页位置、抓取时间和诊断
     """
+    if min(max_chars_each, max_total_chars) < 0:
+        return _tool_error("max_chars_each 和 max_total_chars 必须是非负整数", response_format)
     outcome = await _search(query, num_results)
     items = outcome.items
     if not items:
+        if response_format == "json":
+            return json.dumps({
+                "ok": not bool(outcome.failures), "query": query,
+                "search_status": "incomplete" if outcome.failures else "no_results",
+                "results": [], "pages": [], "diagnostics": outcome.failures,
+            }, ensure_ascii=False)
         return _format_search(query, outcome)
 
     fetch_top_n = max(0, min(fetch_top_n, len(items)))
@@ -426,15 +499,35 @@ async def deep_research(
 
     async def _bound_fetch(client, u):
         async with sem:
-            return await _fetch_one(client, u, max_chars_each)
+            return await _fetch_one(client, u, 0)
 
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as c:
         fetched = await asyncio.gather(*[_bound_fetch(c, u) for u in top_urls])
 
+    remaining = max_total_chars if max_total_chars else None
+    bounded = []
+    for result in fetched:
+        limit = max_chars_each if max_chars_each else None
+        if remaining is not None:
+            limit = min(limit, remaining) if limit is not None else remaining
+        sliced = _slice_page(result, 0, limit)
+        bounded.append(sliced)
+        if remaining is not None:
+            remaining -= len(sliced["text"])
+    fetched = bounded
     fetched_by_url = {f["url"]: f for f in fetched}
 
     ok_count = sum(1 for f in fetched if f["ok"])
+    returned_chars = sum(len(f["text"]) for f in fetched)
+    if response_format == "json":
+        return json.dumps({
+            "ok": ok_count == fetch_top_n, "query": query, "search_status": "results",
+            "results": items, "pages": fetched, "diagnostics": outcome.failures,
+            "requested_pages": fetch_top_n, "successful_pages": ok_count,
+            "returned_body_chars": returned_chars, "max_total_chars": max_total_chars,
+        }, ensure_ascii=False)
     out = [f"# 深度调研：{query}", f"_共 {len(items)} 条搜索结果，尝试抓取 {fetch_top_n} 篇，成功 {ok_count} 篇_\n"]
+    out.append(f"_本次返回正文 {returned_chars} 字符；总预算：{max_total_chars or '不限'}。_\n")
     if outcome.failures:
         out.append(_search_notes(outcome))
     out.append("## 📋 结果索引\n")
@@ -452,8 +545,9 @@ async def deep_research(
         out.append(f"<{url}>\n")
         if f.get("ok"):
             out.append(f["text"])
-            if f.get("truncated"):
-                out.append(f"\n\n…（已截断到 {max_chars_each} 字符）")
+            if not f["text"] and f["total_chars"]:
+                out.append("_正文预算已用尽，请用下方续读入口单独读取。_")
+            out.append(_page_note(f))
             if f.get("cached"):
                 out.append(_cache_note(f))
         else:

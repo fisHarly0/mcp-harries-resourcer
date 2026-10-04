@@ -10,7 +10,7 @@ Resourcer 是一个轻量 MCP 资料工具，把网页搜索、正文提取和�
 
 不需要搜索 API Key。服务通过 stdio 运行；网页搜索和抓取仍会向搜索引擎及目标网站发送网络请求。支持 Claude Code，以及能启动 stdio MCP 服务的其他客户端。
 
-[快速开始](#快速开始) · [使用演示](docs/usage-example.md) · [工具列表](#工具) · [配置](#限速与正文缓存) · [同类项目](docs/alternatives.md)
+[快速开始](#快速开始) · [使用演示](docs/usage-example.md) · [分页与 JSON](docs/reading.md) · [工具列表](#工具) · [配置](#限速与正文缓存) · [优化路线](docs/roadmap.md)
 
 ## 适合做什么
 
@@ -19,6 +19,8 @@ Resourcer 是一个轻量 MCP 资料工具，把网页搜索、正文提取和�
 - **积累笔记**：把整理后的内容写进本地 Markdown 文件，再按关键词找回文件和具体行号。
 
 内置跨调用限速、最多 5 路正文抓取和有容量上限的短时缓存。重复读取可以复用完整正文，保存同名资料不会覆盖旧文件。
+
+长文支持分页续读和正文版本校验；需要新内容时可单次刷新。单页、批量和调研工具支持 JSON 输出，调研资料包可限制正文总长度，按需读取剩余页面。
 
 ```mermaid
 flowchart LR
@@ -84,9 +86,9 @@ claude mcp list
 | `web_search` | 中文优先 Bing，其他查询优先 DuckDuckGo；无结果或失败时切换引擎，失败附诊断 |
 | `web_search_multi` | 并发搜索多个关键词，按查询分组，并跨查询去重 |
 | `search_chinese` | 知乎、B站、微信公众号、简书、CSDN、雪球的 `site:` 定向搜索 |
-| `fetch_page` | 提取一个网页的正文，保留来源 URL；短时重复读取复用缓存并显示缓存年龄 |
-| `fetch_pages` | 批量提取正文；进程内所有调用共享最多 5 个网络抓取名额与限速，单页解析失败不影响其他页 |
-| `deep_research` | 搜索并抓取前 N 条正文，汇集成资料包；不自动总结或保存 |
+| `fetch_page` | 单页正文、分页续读、版本校验、单次刷新；支持 JSON 元数据 |
+| `fetch_pages` | 批量正文与刷新；共享最多 5 个网络抓取名额和限速，返回每页状态与续读位置 |
+| `deep_research` | 搜索并抓取前 N 条正文，按总正文预算返回资料包；支持 JSON，不自动总结或保存 |
 | `search_local` | 在指定本地目录搜索文本，返回文件路径和行号 |
 | `save_finding` | 保存带元数据的 Markdown；同秒同标题自动添加序号，保留已有文件 |
 
@@ -121,7 +123,7 @@ claude mcp add --scope user resourcer -e RESOURCER_RESEARCH_ROOT=D:\research -- 
 - 缓存保存完整提取正文；每次调用再按 `max_chars` 截取，因此先读短摘要不会影响后续读全文。
 - 失败页面和超过单个缓存总容量的正文不缓存；页面过期后重新抓取。
 - 同时抓取相同 URL 时共享进行中的下载，即使关闭缓存也能减少同一时刻的重复请求。
-- 命中缓存时输出标明“正文来自进程内缓存”和年龄；需要每次重新抓取时设置 `RESOURCER_CACHE_TTL_SECONDS=0`。
+- 命中缓存时输出标明“正文来自进程内缓存”和年龄；单次刷新可用 `refresh=true`，需要每次重新抓取时设置 `RESOURCER_CACHE_TTL_SECONDS=0`。
 - 缓存只存在内存，服务退出即清空。限速针对主动发起的请求，HTTP 自动跳转属于同一次请求链；不会保证目标站点不再限流。
 
 ## 如何理解搜索结果
@@ -149,6 +151,8 @@ claude mcp add --scope user resourcer -e RESOURCER_RESEARCH_ROOT=D:\research -- 
 macOS / Linux 使用 `.venv/bin/python -m unittest discover -s tests -v`。
 
 测试使用固定 HTML 样本、模拟 HTTP 响应和可控时钟，覆盖 URL 解码、去重、无结果、验证码、限流、超时、引擎切换、正文失败、共享限速、缓存过期与淘汰、请求取消、保存和本地检索；MCP 测试还会启动真实 stdio 子进程。测试不会向真实搜索引擎发请求，固定样本不保证引擎未来页面保持不变。GitHub Actions 配置了 Windows / Linux 与 Python 3.10 / 3.12 的检查。
+
+分页、刷新、版本变化和 JSON 参数还会通过本地 HTTP 页面与真实 MCP 子进程验证。当前持续优化方向与各批次验收条件见 [优化路线](docs/roadmap.md)。
 
 ### 项目结构
 

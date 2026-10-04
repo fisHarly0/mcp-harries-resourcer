@@ -223,7 +223,7 @@ class ResearchTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_batch_fetch_limits_concurrency_and_keeps_errors(self):
         active = peak = 0
-        async def fetch(client, url, max_chars):
+        async def fetch(client, url, max_chars, **options):
             nonlocal active, peak
             active += 1
             peak = max(peak, active)
