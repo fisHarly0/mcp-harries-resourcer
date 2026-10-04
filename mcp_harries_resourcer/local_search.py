@@ -10,6 +10,7 @@ import time
 
 from .search_results import domain_matches, normalize_domains, url_identity
 from .local_results import RankedFiles, match_preview
+from .local_terms import TermQuery
 
 DEFAULT_EXCLUDES = ".git,node_modules,__pycache__,.venv,venv,.next,dist,build,.godot"
 DEFAULT_EXTENSIONS = "txt,md,py,js,ts,json,html,htm,csv,yaml,yml,toml,gd,godot"
@@ -72,11 +73,14 @@ def search(query: str, root: str, max_results: int = 50,
            include_ext: str = DEFAULT_EXTENSIONS, *, collection: str = "",
            tags: str = "", source_domain: str = "", exclude_dirs: str = DEFAULT_EXCLUDES,
            max_entries: int = 100000, max_file_bytes: int = 2 * 1024 * 1024,
-           time_budget_seconds: float = 10, result_mode: str = "lines",
+           time_budget_seconds: float = 10, result_mode: str = "lines", query_mode: str = "literal",
            cancelled: threading.Event | None = None) -> dict:
     started = time.monotonic()
     if result_mode not in {"lines", "files"}:
         raise ValueError("result_mode 必须是 lines 或 files")
+    if query_mode not in {"literal", "all", "any"}:
+        raise ValueError("query_mode 必须是 literal、all 或 any")
+    terms = TermQuery(query, query_mode) if query_mode != "literal" else None
     for name, value, upper in (("max_results", max_results, 1000),
                                ("max_entries", max_entries, 1000000),
                                ("max_file_bytes", max_file_bytes, 16 * 1024 * 1024)):
@@ -165,6 +169,19 @@ def search(query: str, root: str, max_results: int = 50,
         stats["files_searched"] += 1
         preview, preview_truncated = _preview_metadata(meta)
         base = {"path": str(path), "metadata": preview, "metadata_truncated": preview_truncated}
+        if terms is not None and needle:
+            if ranked is not None:
+                match = terms.file(lines, meta, path.name, base, expired)
+                if match is not None:
+                    hit, priority = match
+                    ranked.add(hit, priority, path.relative_to(root_path).as_posix())
+            else:
+                for hit in terms.lines(lines, base, expired):
+                    hits.append(hit)
+                    if len(hits) >= max_results:
+                        stop_reason = "max_results"
+                        break
+            return
         fields = []
         first_hit = None
         matched_lines = 0
@@ -255,6 +272,7 @@ def search(query: str, root: str, max_results: int = 50,
                      "results_truncated": ranked.count > len(hits)}
         incomplete = incomplete or selection["results_truncated"]
     return {"ok": True, "query": query, "root": str(root_path), "matches": hits, "result_mode": result_mode,
+            "query_mode": query_mode, **({"query_terms": list(terms.terms)} if terms is not None else {}),
             "complete": not incomplete, "stop_reason": stop_reason,
             "filters": {"collection": collection, "tags": sorted(requested_tags), "source_domain": domains[0] if domains else ""},
             "stats": stats, "skipped": skipped, "elapsed_seconds": round(time.monotonic() - started, 4), **selection}
@@ -265,8 +283,14 @@ def format_result(result: dict) -> str:
     files = result.get("result_mode") == "files"
     has_query = bool(result["query"].strip())
     order = "标题、标签、文件名、全文依次优先" if has_query else "按相对路径排序"
+    if has_query and result.get("query_mode") == "all":
+        order = "按全部关键词可覆盖的字段层级排序"
     lines = [f"# 本地搜索：{result['query'] if has_query else '按元数据筛选'}", f"root: {result['root']}",
              f"返回 {len(hits)} 个文件（{order}）" if files else f"命中 {len(hits)} 处"]
+    if has_query and result.get("query_mode") in {"all", "any"}:
+        relation = "全部" if result["query_mode"] == "all" else "任一"
+        scope = "同一文件" if files else "同一行"
+        lines.append(f"匹配规则：{scope}命中{relation}关键词；空白分词、标点按字面匹配。")
     if files:
         if not result["scan_complete"]:
             lines.append(f"扫描不完整（{result['stop_reason'] or '有文件未能搜索'}）；排序仅限已完成扫描的文件。")
@@ -283,12 +307,17 @@ def format_result(result: dict) -> str:
         if hit["path"] != current:
             current = hit["path"]
             lines.append(f"\n**{current}**")
-        prefix = f"L{hit['line']}: " if hit["line"] is not None else ""
-        before = "…" if hit.get("text_start", 0) else ""
-        after = "…" if hit.get("text_end", 0) < hit.get("source_chars", 0) else ""
-        lines.append(f"  {prefix}{before}{hit['text']}{after}")
+        for preview in hit.get("term_matches", [hit]):
+            prefix = f"L{preview['line']}: " if preview["line"] is not None else ""
+            term = f"[{preview['term']}] " if "term" in preview else ""
+            source = f"{preview['preview_source']}: " if "term" in preview and preview["line"] is None else ""
+            before = "…" if preview.get("text_start", 0) else ""
+            after = "…" if preview.get("text_end", 0) < preview.get("source_chars", 0) else ""
+            lines.append(f"  {term}{source}{prefix}{before}{preview['text']}{after}")
         if files and hit["matched_fields"]:
             lines.append("  命中字段：" + ", ".join(hit["matched_fields"]) + f"；全文命中 {hit['matched_lines']} 行")
+            if "rank_field" in hit:
+                lines.append("  排序层级：" + hit["rank_field"])
     lines.append("\n扫描：" + json.dumps(result["stats"], ensure_ascii=False))
     lines.append("跳过：" + json.dumps({k: v for k, v in result["skipped"].items() if v}, ensure_ascii=False))
     return "\n".join(lines)

@@ -538,6 +538,8 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
                         })
                         local_schema = next(t.inputSchema for t in listed.tools if t.name == "search_local")
                         self.assertEqual(local_schema["properties"]["result_mode"]["enum"], ["lines", "files"])
+                        self.assertEqual(local_schema["properties"]["query_mode"]["enum"], ["literal", "all", "any"])
+                        self.assertEqual(local_schema["properties"]["query_mode"]["default"], "literal")
                         saved = await session.call_tool("save_finding", {
                             "collection": "smoke", "title": "MCP note", "content": "Protocol workflow verified.",
                             "tags": "protocol, MCP", "source_url": "https://docs.python.org/3/",
@@ -555,6 +557,24 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
                         self.assertTrue(ranked_data["results_truncated"])
                         self.assertFalse(ranked_data["complete"])
                         self.assertEqual(ranked_data["matched_files"], 2)
+                        for mode, expected in (("literal", 0), ("all", 1), ("any", 2)):
+                            multiple = await session.call_tool("search_local", {
+                                "query": "MCP verified", "root": tmp, "result_mode": "files",
+                                "query_mode": mode, "response_format": "json"})
+                            self.assertFalse(multiple.isError)
+                            data = json.loads("\n".join(c.text for c in multiple.content if c.type == "text"))
+                            self.assertEqual(len(data["matches"]), expected)
+                            self.assertTrue(data["complete"])
+                            if mode == "all":
+                                hit, = data["matches"]
+                                self.assertEqual(hit["matched_terms"], ["MCP", "verified"])
+                                self.assertTrue(all(e["term"].casefold() in e["text"].casefold() for e in hit["term_matches"]))
+                                self.assertEqual(hit["rank_field"], "text")
+                        invalid_query = await session.call_tool("search_local", {
+                            "query": "x" * 4097, "root": tmp, "query_mode": "all", "response_format": "json"})
+                        invalid_data = json.loads("\n".join(c.text for c in invalid_query.content if c.type == "text"))
+                        self.assertFalse(invalid_data["ok"])
+                        self.assertIn("4096", invalid_data["error"])
                         found = await session.call_tool("search_local", {"query": "Protocol workflow verified", "root": tmp})
                         self.assertFalse(found.isError)
                         self.assertIn("Protocol workflow verified", "\n".join(c.text for c in found.content if c.type == "text"))

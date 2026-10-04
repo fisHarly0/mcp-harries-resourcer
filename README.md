@@ -46,6 +46,8 @@ Markdown 保留所选正文的嵌套列表层级、有序列表起始编号和�
 
 本地找资料时可指定 `search_local(..., result_mode="files")`，每份文件只返回一条，标题、标签、文件名命中优先于普通全文命中。默认 `lines` 仍按行返回；两种模式的长行摘要都会展示关键词附近的上下文。扫描预算、排序和结果截断见 [本地检索说明](docs/local-search.md)。
 
+记得多个关键词但不记得原句时，可用 `search_local(query="asyncio 取消", root="资料目录", result_mode="files", query_mode="all")`。两个词可以分散在同一文件中，结果附各词的命中位置；`any` 匹配任一词。默认 `literal` 保留连续子串匹配，空格和代码标点仍按原样搜索。多词模式按空白拆分，最多 16 个不同词、4096 字符，不自动做中文分词或解释查询操作符。
+
 ```mermaid
 flowchart LR
     Q[问题] --> S[网页搜索 / 中文站点搜索]
@@ -121,7 +123,7 @@ claude mcp list
 | `fetch_page` | 纯文本或 Markdown 正文、引用索引、分页续读、版本校验、单次刷新；支持 JSON 元数据 |
 | `fetch_pages` | 批量正文与刷新；共享最多 5 个抓取名额和限速，到整批时限后返回已完成正文与未完成 URL |
 | `deep_research` | 搜索和前 N 条正文抓取共用整批时限，支持双引擎合并和总正文预算；支持 JSON，不自动总结或保存 |
-| `search_local` | 本地文本搜索，按集合／标签／来源域名筛选；支持 JSON、有界读取和完整性诊断 |
+| `search_local` | 本地文本搜索，支持字面／全部词／任一词匹配、文件排序及元数据筛选；返回命中依据和完整性诊断 |
 | `save_finding` | 保存带元数据的 Markdown；同秒同标题自动添加序号，保留已有文件 |
 
 ## 保存目录
@@ -219,6 +221,7 @@ mcp-harries-resourcer/
 │   ├── search_results.py    # 域名筛选、URL 去重与来源合并
 │   ├── local_results.py     # 命中上下文与有界文件排序
 │   ├── local_search.py      # 本地检索、筛选和扫描限制
+│   ├── local_terms.py       # 有界多关键词匹配与逐词命中依据
 │   ├── html_encoding.py     # 网页编码声明、解码与诊断
 │   ├── page_content.py      # Markdown、代码保留与引用
 │   ├── parse_policy.py      # 搜索与正文解析进程管理
