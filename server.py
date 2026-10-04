@@ -1,35 +1,40 @@
-"""MCP server: 资料查找助手 (resourcer) — 高强度版
+"""MCP server: 资料查找助手 (resourcer)
 
 工具：
-  - web_search        : DDG 网页搜索，限流自动 fallback 到 Bing
+  - web_search        : 中文优先 Bing，其他优先 DDG，失败切换并附诊断
   - web_search_multi  : 并发跑多个 query，结果合并去重
   - fetch_page        : 抓取单页正文
   - fetch_pages       : 并发批量抓取
-  - deep_research     : 一站式 → 搜索 + 抓前 N 个正文 + 汇总
+  - deep_research     : 搜索 + 抓前 N 个正文，返回资料包供调用方总结
   - search_local      : 本地目录全文搜索
   - search_chinese    : 知乎/B站/微信公众号 定向搜索
   - save_finding      : 把整理好的资料写入 research collection 目录
 
-通过 stdio 与 Claude Code 通信，所以禁止 print 到 stdout。
+通过 stdio 与 MCP 客户端通信，所以禁止 print 到 stdout。
 """
 
 import asyncio
 import base64
+import json
 import os
 import re
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote_plus, unquote, parse_qs, urlparse
+from urllib.parse import quote_plus, parse_qs, urlparse
 
 import httpx
 import trafilatura
 from bs4 import BeautifulSoup
 from mcp.server.fastmcp import FastMCP
 
+from request_policy import RequestPolicy
+
 mcp = FastMCP("resourcer")
 
 DEFAULT_TIMEOUT = 25.0
 FETCH_CONCURRENCY = 5
+NETWORK = RequestPolicy.from_env()
 RESEARCH_ROOT = Path(
     os.environ.get("RESOURCER_RESEARCH_ROOT", str(Path.home() / "research"))
 )
@@ -51,7 +56,7 @@ def _clean_ddg_url(href: str) -> str:
     if "uddg=" in href:
         q = parse_qs(urlparse(href).query)
         if "uddg" in q:
-            return unquote(q["uddg"][0])
+            return q["uddg"][0]
     return href
 
 
@@ -66,7 +71,7 @@ def _parse_ddg(html: str, max_results: int) -> list[dict]:
         title = a.get_text(strip=True)
         snip = div.select_one(".result__snippet")
         snippet = snip.get_text(" ", strip=True) if snip else ""
-        if url and title:
+        if urlparse(url).scheme in {"http", "https"} and title and not any(it["url"] == url for it in out):
             out.append({"url": url, "title": title, "snippet": snippet, "source": "ddg"})
         if len(out) >= max_results:
             break
@@ -102,24 +107,50 @@ def _parse_bing(html: str, max_results: int) -> list[dict]:
         title = a.get_text(strip=True)
         p = li.select_one("p, .b_caption p")
         snippet = p.get_text(" ", strip=True) if p else ""
-        if url and title:
+        if urlparse(url).scheme in {"http", "https"} and title and not any(it["url"] == url for it in out):
             out.append({"url": url, "title": title, "snippet": snippet, "source": "bing"})
         if len(out) >= max_results:
             break
     return out
 
 
+class SearchEngineError(Exception):
+    """An engine failed; this is different from a valid empty result page."""
+
+
+@dataclass
+class SearchOutcome:
+    items: list[dict] = field(default_factory=list)
+    failures: list[str] = field(default_factory=list)
+
+
+def _parse_search_response(response: httpx.Response, engine: str, max_results: int) -> list[dict]:
+    if response.status_code == 429:
+        raise SearchEngineError("限流（HTTP 429）")
+    if response.status_code in {202, 403}:
+        raise SearchEngineError(f"访问受限或需要验证（HTTP {response.status_code}）")
+    response.raise_for_status()
+    soup = BeautifulSoup(response.text, "html.parser")
+    if soup.select_one(".anomaly-modal, #challenge-form, #b_captcha, .g-recaptcha, #captcha"):
+        raise SearchEngineError("访问受限或需要验证码")
+    parser = _parse_ddg if engine == "ddg" else _parse_bing
+    try:
+        items = parser(response.text, max_results)
+    except (TypeError, ValueError) as exc:
+        raise SearchEngineError("解析失败：结果页面包含无效数据") from exc
+    if items:
+        return items
+    empty_selector = ".no-results, .result--no-result, .no-results__message" if engine == "ddg" else "#b_results .b_no"
+    if soup.select_one(empty_selector):
+        return []
+    raise SearchEngineError("解析失败：未识别结果或无结果标记，可能是页面改版或拦截")
+
+
 async def _ddg(client: httpx.AsyncClient, query: str, max_results: int) -> list[dict]:
     url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
-    for attempt in range(2):
-        r = await client.post(url, headers={"User-Agent": UA})
-        if r.status_code == 200:
-            items = _parse_ddg(r.text, max_results)
-            if items:
-                return items
-        if attempt == 0:
-            await asyncio.sleep(1.2)
-    return []
+    await NETWORK.wait_for_search("ddg")
+    response = await client.post(url, headers={"User-Agent": UA})
+    return _parse_search_response(response, "ddg", max_results)
 
 
 def _has_chinese(s: str) -> bool:
@@ -127,41 +158,66 @@ def _has_chinese(s: str) -> bool:
 
 
 async def _bing(client: httpx.AsyncClient, query: str, max_results: int, mkt: str) -> list[dict]:
-    """始终走 cn.bing.com（国内访问最稳），靠 mkt 切换语言偏好。"""
+    """使用 cn.bing.com，靠 mkt 切换语言偏好。"""
     url = f"https://cn.bing.com/search?q={quote_plus(query)}&count={max_results}&mkt={mkt}"
     accept_lang = "zh-CN,zh;q=0.9,en;q=0.8" if mkt.startswith("zh") else "en-US,en;q=0.9,zh;q=0.5"
-    try:
-        r = await client.get(url, headers={"User-Agent": UA, "Accept-Language": accept_lang})
-    except Exception:
-        return []
-    if r.status_code != 200:
-        return []
-    return _parse_bing(r.text, max_results)
+    await NETWORK.wait_for_search("bing")
+    response = await client.get(url, headers={"User-Agent": UA, "Accept-Language": accept_lang})
+    # Some regions redirect cn.bing.com/search to the www homepage, losing /search.
+    # Retry the canonical search route once instead of parsing the homepage as results.
+    if response.url.host in {"bing.com", "www.bing.com", "cn.bing.com"} and response.url.path in {"", "/"}:
+        canonical_url = f"https://www.bing.com/search?q={quote_plus(query)}&count={max_results}&mkt={mkt}"
+        await NETWORK.wait_for_search("bing")
+        response = await client.get(canonical_url, headers={"User-Agent": UA, "Accept-Language": accept_lang})
+    return _parse_search_response(response, "bing", max_results)
 
 
-async def _search(query: str, max_results: int) -> list[dict]:
+async def _search(query: str, max_results: int) -> SearchOutcome:
     """按 query 语言路由引擎，互相 fallback。"""
+    if not query.strip():
+        return SearchOutcome(failures=["关键词不能为空"])
+    max_results = max(1, min(int(max_results), 50))
     chinese = _has_chinese(query)
+    outcome = SearchOutcome()
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as c:
         if chinese:
             engines = [
-                lambda: _bing(c, query, max_results, "zh-CN"),
-                lambda: _ddg(c, query, max_results),
+                ("Bing/zh-CN", lambda: _bing(c, query, max_results, "zh-CN")),
+                ("DuckDuckGo", lambda: _ddg(c, query, max_results)),
             ]
         else:
             engines = [
-                lambda: _ddg(c, query, max_results),
-                lambda: _bing(c, query, max_results, "en-US"),
-                lambda: _bing(c, query, max_results, "zh-CN"),
+                ("DuckDuckGo", lambda: _ddg(c, query, max_results)),
+                ("Bing/en-US", lambda: _bing(c, query, max_results, "en-US")),
+                ("Bing/zh-CN", lambda: _bing(c, query, max_results, "zh-CN")),
             ]
-        for fetch in engines:
+        for name, fetch in engines:
             try:
                 res = await fetch()
                 if res:
-                    return res
-            except Exception:
-                continue
-    return []
+                    outcome.items = res
+                    return outcome
+            except httpx.TimeoutException:
+                outcome.failures.append(f"{name}：请求超时")
+            except httpx.HTTPStatusError as exc:
+                outcome.failures.append(f"{name}：HTTP {exc.response.status_code}")
+            except httpx.RequestError:
+                outcome.failures.append(f"{name}：网络连接失败")
+            except SearchEngineError as exc:
+                outcome.failures.append(f"{name}：{exc}")
+    return outcome
+
+
+def _search_notes(outcome: SearchOutcome) -> str:
+    if not outcome.failures:
+        return ""
+    return "\n\n搜索诊断：\n" + "\n".join(f"- {failure}" for failure in outcome.failures)
+
+
+def _format_search(query: str, outcome: SearchOutcome) -> str:
+    if not outcome.items and outcome.failures:
+        return f"搜索未完成：无法确认 “{query}” 是否有相关结果。" + _search_notes(outcome)
+    return _format_results(query, outcome.items) + _search_notes(outcome)
 
 
 def _format_results(query: str, items: list[dict]) -> str:
@@ -178,6 +234,20 @@ def _format_results(query: str, items: list[dict]) -> str:
 
 
 async def _fetch_one(client: httpx.AsyncClient, url: str, max_chars: int) -> dict:
+    result = await NETWORK.fetch(url, lambda: _fetch_uncached(client, url))
+    result["truncated"] = max_chars > 0 and len(result["text"]) > max_chars
+    if result["truncated"]:
+        result["text"] = result["text"][:max_chars]
+    return result
+
+
+def _cache_note(result: dict) -> str:
+    if result.get("cached"):
+        return f"\n\n_正文来自进程内缓存（约 {result['cache_age_seconds']} 秒前抓取）。_"
+    return ""
+
+
+async def _fetch_uncached(client: httpx.AsyncClient, url: str) -> dict:
     try:
         r = await client.get(url, headers={"User-Agent": UA})
     except Exception as e:
@@ -185,10 +255,13 @@ async def _fetch_one(client: httpx.AsyncClient, url: str, max_chars: int) -> dic
     if r.status_code != 200:
         return {"url": url, "ok": False, "error": f"HTTP {r.status_code}", "title": "", "text": ""}
 
-    text = trafilatura.extract(
-        r.text, url=url,
-        include_comments=False, include_tables=True, favor_recall=True,
-    ) or ""
+    try:
+        text = trafilatura.extract(
+            r.text, url=url,
+            include_comments=False, include_tables=True, favor_recall=True,
+        ) or ""
+    except Exception:
+        return {"url": url, "ok": False, "error": "正文解析失败", "title": "", "text": ""}
     title = ""
     try:
         soup = BeautifulSoup(r.text, "html.parser")
@@ -197,13 +270,9 @@ async def _fetch_one(client: httpx.AsyncClient, url: str, max_chars: int) -> dic
     except Exception:
         pass
 
-    truncated = False
-    if max_chars > 0 and len(text) > max_chars:
-        text = text[:max_chars]
-        truncated = True
     return {
         "url": url, "ok": bool(text), "error": "" if text else "无法提取正文",
-        "title": title, "text": text, "truncated": truncated,
+        "title": title, "text": text,
     }
 
 
@@ -211,15 +280,15 @@ async def _fetch_one(client: httpx.AsyncClient, url: str, max_chars: int) -> dic
 
 @mcp.tool()
 async def web_search(query: str, max_results: int = 10) -> str:
-    """通用网页搜索（DDG 优先，限流时自动 fallback Bing）。
+    """通用网页搜索（中文优先 Bing，其他优先 DDG；失败自动切换并报告诊断）。
 
     Args:
         query: 关键词，可用 site: filetype: 高级语法
         max_results: 1-50
     """
     max_results = max(1, min(int(max_results), 50))
-    items = await _search(query, max_results)
-    return _format_results(query, items)
+    outcome = await _search(query, max_results)
+    return _format_search(query, outcome)
 
 
 @mcp.tool()
@@ -244,13 +313,16 @@ async def web_search_multi(queries: list[str], per_query: int = 8) -> str:
             blocks.append(f"# {q}\n搜索失败：{res}")
             continue
         unique = []
-        for it in res:
+        for it in res.items:
             if it["url"] in seen_urls:
                 continue
             seen_urls.add(it["url"])
             unique.append(it)
         total += len(unique)
-        blocks.append(_format_results(q, unique))
+        if res.items and not unique:
+            blocks.append(f"# {q}\n结果与前面的查询重复，已全部去重。" + _search_notes(res))
+        else:
+            blocks.append(_format_search(q, SearchOutcome(unique, res.failures)))
     header = f"# 多查询搜索（{len(queries)} 个 query，去重后 {total} 条）\n"
     return header + "\n\n---\n\n".join(blocks)
 
@@ -291,12 +363,12 @@ async def fetch_page(url: str, max_chars: int = 50000) -> str:
         return f"抓取失败 ({res['error']})：{url}"
     head = f"# {res['title'] or url}\n<{url}>\n"
     tail = f"\n\n…（已截断到 {max_chars} 字符）" if res["truncated"] else ""
-    return head + "\n" + res["text"] + tail
+    return head + "\n" + res["text"] + tail + _cache_note(res)
 
 
 @mcp.tool()
 async def fetch_pages(urls: list[str], max_chars: int = 30000) -> str:
-    """并发批量抓取多个 URL 的正文。最多 5 路并发以免被封。
+    """批量抓取正文；进程内最多 5 路网络抓取，共享限速与短时缓存。
 
     Args:
         urls: URL 列表
@@ -321,7 +393,7 @@ async def fetch_pages(urls: list[str], max_chars: int = 30000) -> str:
             blocks.append(f"\n---\n## ❌ {r['url']}\n{r['error']}")
         else:
             tail = f"\n\n…（已截断到 {max_chars} 字符）" if r["truncated"] else ""
-            blocks.append(f"\n---\n## {r['title'] or r['url']}\n<{r['url']}>\n\n{r['text']}{tail}")
+            blocks.append(f"\n---\n## {r['title'] or r['url']}\n<{r['url']}>\n\n{r['text']}{tail}" + _cache_note(r))
     return "\n".join(blocks)
 
 
@@ -334,7 +406,7 @@ async def deep_research(
     fetch_top_n: int = 6,
     max_chars_each: int = 20000,
 ) -> str:
-    """一站式：搜索 → 抓取前 N 条结果的正文 → 汇总。适合整晚批量调研。
+    """搜索并抓取前 N 条正文，返回资料包供调用方总结；不自动写文件。
 
     Args:
         query: 调研主题
@@ -342,9 +414,10 @@ async def deep_research(
         fetch_top_n: 抓取前几条的正文（≤ num_results）
         max_chars_each: 每篇正文截断长度；0 = 不截断
     """
-    items = await _search(query, num_results)
+    outcome = await _search(query, num_results)
+    items = outcome.items
     if not items:
-        return f"未找到 “{query}” 的相关结果"
+        return _format_search(query, outcome)
 
     fetch_top_n = max(0, min(fetch_top_n, len(items)))
     top_urls = [it["url"] for it in items[:fetch_top_n]]
@@ -360,10 +433,14 @@ async def deep_research(
 
     fetched_by_url = {f["url"]: f for f in fetched}
 
-    out = [f"# 深度调研：{query}", f"_共 {len(items)} 条搜索结果，抓取 {fetch_top_n} 篇正文_\n"]
+    ok_count = sum(1 for f in fetched if f["ok"])
+    out = [f"# 深度调研：{query}", f"_共 {len(items)} 条搜索结果，尝试抓取 {fetch_top_n} 篇，成功 {ok_count} 篇_\n"]
+    if outcome.failures:
+        out.append(_search_notes(outcome))
     out.append("## 📋 结果索引\n")
     for i, it in enumerate(items, 1):
-        marker = "✅" if i <= fetch_top_n else "  "
+        result = fetched_by_url.get(it["url"])
+        marker = ("✅" if result["ok"] else "❌") if result else "  "
         out.append(f"{marker} {i}. [{it['title']}]({it['url']})")
         if it["snippet"]:
             out.append(f"   > {it['snippet']}")
@@ -377,6 +454,8 @@ async def deep_research(
             out.append(f["text"])
             if f.get("truncated"):
                 out.append(f"\n\n…（已截断到 {max_chars_each} 字符）")
+            if f.get("cached"):
+                out.append(_cache_note(f))
         else:
             out.append(f"_抓取失败：{f.get('error', '未知')}_")
     return "\n".join(out)
@@ -472,15 +551,25 @@ def save_finding(
     target = target_dir / fname
 
     tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-    fm = ["---", f"title: {title}", f"collection: {collection}",
-          f"saved_at: {ts.isoformat()}"]
+    # JSON strings/lists are valid YAML scalars; quotes and newlines stay data.
+    fm = ["---", f"title: {json.dumps(title, ensure_ascii=False)}",
+          f"collection: {json.dumps(collection, ensure_ascii=False)}",
+          f"saved_at: {json.dumps(ts.isoformat())}"]
     if source_url:
-        fm.append(f"source_url: {source_url}")
+        fm.append(f"source_url: {json.dumps(source_url, ensure_ascii=False)}")
     if tag_list:
-        fm.append("tags: [" + ", ".join(tag_list) + "]")
+        fm.append("tags: " + json.dumps(tag_list, ensure_ascii=False))
     fm.append("---\n")
 
-    target.write_text("\n".join(fm) + content, encoding="utf-8")
+    suffix = 0
+    while True:
+        try:
+            with target.open("x", encoding="utf-8") as output:
+                output.write("\n".join(fm) + content)
+            break
+        except FileExistsError:
+            suffix += 1
+            target = target_dir / f"{Path(fname).stem}-{suffix}.md"
 
     count = sum(1 for _ in target_dir.glob("*.md"))
     return f"✅ 已保存：{target}\n（collection 中现共 {count} 篇）"
