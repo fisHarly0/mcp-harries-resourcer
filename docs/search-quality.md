@@ -14,6 +14,8 @@ python scripts/search_smoke.py --output search-evidence.json
 
 默认比较 `fallback` 与 `merge`，每例取前 5 条，合计 12 次搜索。通过真实 stdio MCP 调用 `web_search_multi`，每次只传一个查询，共用生产搜索逻辑，并使用 30 秒整批预算。网络限速、重试与诊断继续生效。
 
+配置 SearXNG 实例后可加 `--backend searxng`，默认每例只测一次实例聚合；不支持 `merge`。默认 `--backend builtin` 保持上述双策略比较。后端记录在报告的 `settings.backend` 和查询记录中，每份报告只测一种后端；配置与验证边界见 [SearXNG 接入](searxng.md)。下文实测记录均来自内置后端。
+
 可调整：
 
 ```text
@@ -59,9 +61,9 @@ python scripts/search_smoke.py --case asyncio-zh --case react-effect-zh --strate
 
 另外对 3 个查询比较了 `cn.bing.com` 与直接 `www.bing.com`，以及参考 [SearXNG Bing 适配器](https://github.com/searxng/searxng/blob/master/searx/engines/bing.py) 的 `setlang` 参数构造方式。直接域名避免了地区跳转追加 `mkt`，但这组对照仍未命中参考页；语言参数方案也没有改善命中。没有据此改变生产请求策略或移植其代码。
 
-SearXNG 仍是可选后端候选。[官方 API 文档](https://docs.searxng.org/dev/search_api.html)说明 JSON 格式需要实例启用，许多公共实例关闭该格式。本次没有可供比较的已配置实例，没有把 API 接口存在写成搜索质量已经改善。
+测量时 SearXNG 尚为后端候选，后续已完成 [可选接入与协议验证](searxng.md)。[官方 API 文档](https://docs.searxng.org/dev/search_api.html)说明 JSON 格式需要实例启用，许多公共实例关闭该格式。目前仍没有可供比较的已配置实例，尚不能判断搜索质量是否改善。
 
-## 本批修正
+## 0.1.2 批次修正
 
 搜索标题和摘要改为保留行内文本的原有空白，再统一连续空白；`br` 作为换行空格处理。这样 `Python <b>documentation</b>` 不会拼成一个词，`<b>use</b>Effect` 不会被拆开，中文词组和标点也不会凭空加空格。回归样本覆盖这些情况，以及首页误判、相似域名、端口、空结果和报告中断。
 

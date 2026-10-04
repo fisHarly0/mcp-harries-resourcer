@@ -117,7 +117,15 @@ def checkpoint(path, report):
             temporary.unlink()
 
 
-async def run(cases, strategies, repeats, per_query, budget, output):
+def select_strategies(backend, strategies=None):
+    selected = list(dict.fromkeys(strategies or (["fallback"] if backend == "searxng" else ["fallback", "merge"])))
+    if backend == "searxng" and "merge" in selected:
+        raise ValueError("SearXNG uses instance aggregation; --strategies merge applies only to builtin")
+    return selected
+
+
+async def run(cases, strategies, repeats, per_query, budget, output, backend="builtin"):
+    strategies = select_strategies(backend, strategies)
     repo = Path(__file__).resolve().parents[1]
     digest = hashlib.sha256()
     for path in sorted((repo / "mcp_harries_resourcer").glob("*.py")):
@@ -131,7 +139,7 @@ async def run(cases, strategies, repeats, per_query, budget, output):
               "worktree_dirty": dirty, "evaluator_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
               "source_sha256": digest.hexdigest(), "cases": cases,
               "planned_runs": len(cases) * len(strategies) * repeats,
-              "settings": {"strategies": strategies, "repeats": repeats, "per_query": per_query,
+              "settings": {"backend": backend, "strategies": strategies, "repeats": repeats, "per_query": per_query,
                            "time_budget_seconds": budget, "tool": "web_search_multi", "queries_per_call": 1},
               "records": []}
     checkpoint(output, report)
@@ -149,10 +157,12 @@ async def run(cases, strategies, repeats, per_query, budget, output):
                             result = await session.call_tool("web_search_multi", {
                                 "queries": [case["query"]], "per_query": per_query, "strategy": strategy,
                                 "include_domains": case["include_domains"], "response_format": "json",
-                                "time_budget_seconds": budget})
+                                "time_budget_seconds": budget, "backend": backend})
                             if result.isError:
                                 raise RuntimeError("MCP tool returned an error; inspect server stderr")
                             payload = json.loads("\n".join(c.text for c in result.content if c.type == "text"))
+                            if "error" in payload:
+                                raise ValueError(payload["error"])
                             state = payload["queries"][0]
                             record = {**state, "case_id": case["id"], "language": case["language"],
                                       "strategy": strategy, "repeat": repeat + 1,
@@ -177,7 +187,8 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--cases", type=Path, default=Path(__file__).with_name("search_cases.json"))
     parser.add_argument("--case", action="append", dest="selected", help="Case id; repeat to select several")
-    parser.add_argument("--strategies", nargs="+", choices=["fallback", "merge"], default=["fallback", "merge"])
+    parser.add_argument("--backend", choices=["builtin", "searxng"], default="builtin")
+    parser.add_argument("--strategies", nargs="+", choices=["fallback", "merge"])
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--per-query", type=int, default=5)
     parser.add_argument("--time-budget-seconds", type=float, default=30)
@@ -188,6 +199,7 @@ def main():
     if not math.isfinite(args.time_budget_seconds) or not 0 < args.time_budget_seconds <= 600:
         parser.error("time budget must be positive and at most 600 seconds")
     try:
+        strategies = select_strategies(args.backend, args.strategies)
         cases = load_cases(args.cases)
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
@@ -195,8 +207,8 @@ def main():
         if set(args.selected) - {case["id"] for case in cases}:
             parser.error("unknown case id")
         cases = [case for case in cases if case["id"] in args.selected]
-    report = asyncio.run(run(cases, list(dict.fromkeys(args.strategies)), args.repeats,
-                             args.per_query, args.time_budget_seconds, args.output))
+    report = asyncio.run(run(cases, strategies, args.repeats,
+                             args.per_query, args.time_budget_seconds, args.output, args.backend))
     if any(r["domain_check"] is False for r in report["records"]):
         raise SystemExit("Domain invariant failed; inspect JSON evidence")
     if args.require_reference and any(not r["reference_found"] for r in report["records"]):

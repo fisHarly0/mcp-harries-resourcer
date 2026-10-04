@@ -40,6 +40,7 @@ from .progress import CompletionCounter, report, with_progress
 from .client_pool import ClientPool
 from .local_search import DEFAULT_EXCLUDES, DEFAULT_EXTENSIONS, search_async as local_search, format_result as format_local
 from .search_results import merge_results, normalize_domains, select_results, url_identity
+from .searxng import SearXNGError, SearXNGReply, search as search_searxng, validate_backend
 
 DEFAULT_TIMEOUT = 25.0
 FETCH_CONCURRENCY = 5
@@ -158,6 +159,7 @@ class SearchOutcome:
     include_domains: list[str] = field(default_factory=list)
     exclude_domains: list[str] = field(default_factory=list)
     deadline_exceeded: bool = False
+    backend: str = "builtin"
 
     @property
     def status(self) -> str:
@@ -221,14 +223,14 @@ async def _bing(client: httpx.AsyncClient, query: str, max_results: int, mkt: st
 async def _search(query: str, max_results: int, strategy: str = "fallback",
                   include_domains: list[str] | None = None,
                   exclude_domains: list[str] | None = None,
-                  snapshot: SearchOutcome | None = None) -> SearchOutcome:
+                  snapshot: SearchOutcome | None = None, backend: str = "builtin") -> SearchOutcome:
     """Route by language, enforce domains locally, optionally merge engines."""
-    if strategy not in {"fallback", "merge"}:
-        raise ValueError("strategy 必须是 fallback 或 merge")
+    endpoint = validate_backend(backend, strategy)
     include = normalize_domains(include_domains)
     exclude = normalize_domains(exclude_domains)
     outcome = snapshot if snapshot is not None else SearchOutcome()
     outcome.strategy, outcome.include_domains, outcome.exclude_domains = strategy, include, exclude
+    outcome.backend = backend
     if not query.strip():
         outcome.failures.append("关键词不能为空")
         return outcome
@@ -242,7 +244,9 @@ async def _search(query: str, max_results: int, strategy: str = "fallback",
     hints.extend(f"-site:{d}" for d in exclude)
     engine_query = " ".join([*hints, query])
     async with HTTP_CLIENTS.lease() as c:
-        if chinese:
+        if backend == "searxng":
+            engines = [("SearXNG", lambda: search_searxng(c, NETWORK, endpoint, engine_query))]
+        elif chinese:
             engines = [
                 ("Bing/zh-CN", lambda: _bing(c, engine_query, candidate_count, "zh-CN")),
                 ("DuckDuckGo", lambda: _ddg(c, engine_query, candidate_count)),
@@ -259,9 +263,22 @@ async def _search(query: str, max_results: int, strategy: str = "fallback",
             failure = ""
             try:
                 res = await wait_for_owned(fetch(), NETWORK.http.total_timeout)
+                reply = res if isinstance(res, SearXNGReply) else None
+                if reply is not None:
+                    res = reply.items
                 selected, rejected = select_results(res, name, include, exclude)
-                return selected, {"engine": name, "status": "success", "returned": len(res),
-                                  "accepted": len(selected), "filtered": rejected}, ""
+                metadata = {"engine": name, "status": "success", "returned": len(res),
+                            "accepted": len(selected), "filtered": rejected}
+                if reply is not None:
+                    for item in selected:
+                        item["provenance"][0].update(rank=item.pop("_rank"),
+                                                      upstream_engines=item.pop("_engines"))
+                    metadata.update(unresponsive_engines=reply.unresponsive_engines,
+                                    invalid_results=reply.invalid_results)
+                    if reply.warnings:
+                        metadata.update(status="partial", warnings=reply.warnings)
+                        failure = "SearXNG：" + "；".join(reply.warnings)
+                return selected, metadata, failure
             except (httpx.TimeoutException, asyncio.TimeoutError):
                 failure = "请求超时"
             except HTTPPolicyError as exc:
@@ -270,7 +287,7 @@ async def _search(query: str, max_results: int, strategy: str = "fallback",
                 failure = f"HTTP {exc.response.status_code}"
             except httpx.RequestError:
                 failure = "网络连接失败"
-            except SearchEngineError as exc:
+            except (SearchEngineError, SearXNGError) as exc:
                 failure = str(exc)
             return [], {"engine": name, "status": "failed", "error": failure}, f"{name}：{failure}"
 
@@ -325,6 +342,8 @@ def _search_payload(query: str, outcome: SearchOutcome) -> dict:
         "ok": bool(outcome.items) or not outcome.failures,
         "query": query, "search_status": outcome.status,
         "complete": not bool(outcome.failures), "strategy": outcome.strategy,
+        "backend": outcome.backend,
+        "effective_strategy": "instance" if outcome.backend == "searxng" else outcome.strategy,
         "include_domains": outcome.include_domains, "exclude_domains": outcome.exclude_domains,
         "results": outcome.items, "diagnostics": outcome.failures,
         "attempts": outcome.attempts, "filtered_count": outcome.filtered_count,
@@ -487,10 +506,12 @@ async def web_search(
     include_domains: list[str] | None = None, exclude_domains: list[str] | None = None,
     response_format: Literal["text", "json"] = "text",
     ctx: Context = None,
+    backend: Literal["builtin", "searxng"] = "builtin",
 ) -> str:
     """通用网页搜索（中文优先 Bing，其他优先 DDG；失败自动切换并报告诊断）。
 
     Args:
+        backend: builtin 内置双引擎；searxng 使用 RESOURCER_SEARXNG_URL，保留默认 strategy
         query: 关键词，可用 site: filetype: 高级语法
         max_results: 1-50
         strategy: fallback 首个有效引擎；merge 同时查询两个引擎并交替合并
@@ -501,7 +522,7 @@ async def web_search(
     max_results = max(1, min(int(max_results), 50))
     report(0, 1, "正在搜索网页")
     try:
-        outcome = await _search(query, max_results, strategy, include_domains, exclude_domains)
+        outcome = await _search(query, max_results, strategy, include_domains, exclude_domains, backend=backend)
     except ValueError as exc:
         return _tool_error(str(exc), response_format)
     report(1, 1, f"搜索已结束：{len(outcome.items)} 条来源" + ("，存在失败诊断" if outcome.failures else ""))
@@ -519,10 +540,12 @@ async def web_search_multi(
     response_format: Literal["text", "json"] = "text",
     time_budget_seconds: float = 120,
     ctx: Context = None,
+    backend: Literal["builtin", "searxng"] = "builtin",
 ) -> str:
     """并发搜索多个 query，结果按 query 分组并去重。
 
     Args:
+        backend: builtin 内置双引擎；searxng 使用 RESOURCER_SEARXNG_URL，保留默认 strategy
         queries: 关键词列表
         per_query: 每个 query 返回多少条（1-30）
         strategy: fallback 或 merge，作用于每个 query
@@ -538,19 +561,18 @@ async def web_search_multi(
         budget = BatchBudget(time_budget_seconds)
         include_domains = normalize_domains(include_domains)
         exclude_domains = normalize_domains(exclude_domains)
-        if strategy not in {"fallback", "merge"}:
-            raise ValueError("strategy 必须是 fallback 或 merge")
+        validate_backend(backend, strategy)
     except ValueError as exc:
         return _tool_error(str(exc), response_format)
 
     snapshots = [SearchOutcome(strategy=strategy, include_domains=include_domains,
-                               exclude_domains=exclude_domains) for _ in queries]
+                               exclude_domains=exclude_domains, backend=backend) for _ in queries]
     report(0, len(queries), f"准备搜索 {len(queries)} 个查询")
     progress = CompletionCounter(len(queries), "查询", successful=lambda outcome: bool(outcome.items) or not outcome.failures)
 
     async def search_index(index):
         return await progress.run(_search(queries[index], per_query, strategy, include_domains, exclude_domains,
-                                          snapshot=snapshots[index]))
+                                          snapshot=snapshots[index], backend=backend))
 
     results = await budget.collect(list(range(len(queries))), search_index)
 
@@ -604,10 +626,12 @@ async def search_chinese(
     strategy: Literal["fallback", "merge"] = "fallback",
     response_format: Literal["text", "json"] = "text",
     ctx: Context = None,
+    backend: Literal["builtin", "searxng"] = "builtin",
 ) -> str:
     """中文站点定向搜索（site: 提示并逐条校验返回链接的域名）。
 
     Args:
+        backend: builtin 内置双引擎；searxng 使用 RESOURCER_SEARXNG_URL，保留默认 strategy
         query: 关键词
         site: zhihu | bilibili | weixin | jianshu | csdn | xueqiu
         max_results: 返回条数
@@ -622,7 +646,7 @@ async def search_chinese(
     domain = site_map.get(site.lower())
     if not domain:
         return _tool_error(f"不支持的 site：{site}（支持：{', '.join(site_map)}）", response_format)
-    return await web_search(query, max_results, strategy, [domain], response_format=response_format, ctx=ctx)
+    return await web_search(query, max_results, strategy, [domain], response_format=response_format, ctx=ctx, backend=backend)
 
 
 # ───────────────────────── tools: fetch ─────────────────────────
@@ -738,10 +762,12 @@ async def deep_research(
     time_budget_seconds: float = 120,
     content_format: Literal["text", "markdown"] = "text",
     ctx: Context = None,
+    backend: Literal["builtin", "searxng"] = "builtin",
 ) -> str:
     """搜索并抓取前 N 条正文，返回资料包供调用方总结；不自动写文件。
 
     Args:
+        backend: builtin 内置双引擎；searxng 使用 RESOURCER_SEARXNG_URL，保留默认 strategy
         query: 调研主题
         num_results: 搜索结果数
         fetch_top_n: 抓取前几条的正文（≤ num_results）
@@ -762,14 +788,13 @@ async def deep_research(
         budget = BatchBudget(time_budget_seconds)
         include_domains = normalize_domains(include_domains)
         exclude_domains = normalize_domains(exclude_domains)
-        if strategy not in {"fallback", "merge"}:
-            raise ValueError("strategy 必须是 fallback 或 merge")
+        validate_backend(backend, strategy)
     except ValueError as exc:
         return _tool_error(str(exc), response_format)
-    snapshot = SearchOutcome(strategy=strategy, include_domains=include_domains or [], exclude_domains=exclude_domains or [])
+    snapshot = SearchOutcome(strategy=strategy, include_domains=include_domains or [], exclude_domains=exclude_domains or [], backend=backend)
     report(0, None, "正在搜索调研来源")
     searched = await budget.collect([query], lambda q: _search(q, num_results, strategy, include_domains,
-                                                              exclude_domains, snapshot=snapshot), concurrency=1)
+                                                              exclude_domains, snapshot=snapshot, backend=backend), concurrency=1)
     outcome = searched[0]
     if isinstance(outcome, Unfinished):
         outcome = _unfinished_search(snapshot, outcome)

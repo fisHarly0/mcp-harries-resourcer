@@ -108,7 +108,7 @@ class RequestPolicy:
                  cache_bytes=8 * 1024 * 1024, fetch_concurrency=5, *, clock=time.monotonic,
                  sleep=asyncio.sleep, http_policy=None):
         self.http = http_policy if http_policy is not None else HTTPPolicy(clock=clock, sleep=sleep)
-        self.search_pacers = {engine: RequestPacer(search_rpm, clock=clock, sleep=sleep) for engine in ("ddg", "bing")}
+        self.search_pacers = {engine: RequestPacer(search_rpm, clock=clock, sleep=sleep) for engine in ("ddg", "bing", "searxng")}
         self.fetch_pacer = RequestPacer(fetch_rpm, clock=clock, sleep=sleep)
         self.fetch_slots = asyncio.Semaphore(fetch_concurrency)
         self.cache = PageCache(cache_ttl, cache_entries, cache_bytes, clock=clock)

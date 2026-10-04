@@ -2,6 +2,8 @@
 
 搜索工具默认保留原来的文本输出和引擎切换方式。新增参数不需要额外依赖或搜索 API Key。更新代码后重新连接 MCP 服务，客户端才能发现新参数。
 
+本页的双引擎策略针对默认 `backend="builtin"`。四个搜索相关工具也支持显式 `backend="searxng"`；需要配置实例并启用 JSON，来源筛选规则相同，聚合和失败语义见 [SearXNG 接入](searxng.md)。
+
 ## 指定来源
 
 只搜 Python 官方文档：
@@ -30,7 +32,7 @@ web_search(
 - 包含条件匹配域名本身及其子域名；多个包含域名之间为“或”，排除优先。空列表表示没有对应限制。
 - `example.org.evil.org`、`notexample.org` 不会匹配 `example.org`，包含用户信息或格式有歧义的链接也会被丢弃。
 - 工具向引擎发送 `site:` / `-site:` 提示，再检查每条候选链接的真实主机名。手写在 query 中的 `site:` 不会自动变成服务端筛选条件。
-- 有筛选时，每次尝试最多检查 `min(50, max(10, max_results * 3))` 条候选；引擎可能返回更少。筛选后数量可能不足，不自动翻页，也不会放宽条件填满结果。
+- 内置搜索有筛选时，每次尝试最多检查 `min(50, max(10, max_results * 3))` 条候选；SearXNG 最多检查第一页前 50 条。引擎可能返回更少。筛选后数量可能不足，不自动翻页，也不会放宽条件填满结果。
 - 这限制的是**搜索结果链接**。后续 `fetch_page` / `deep_research` 的 HTTP 跳转可能到其他域名，抓取结果中的 `final_url` 可用于核对；筛选不是网络访问隔离机制。
 
 `search_chinese(query="异步编程", site="zhihu")` 自动应用 `zhihu.com` 筛选。其余站点映射保持不变，微信公众号匹配 `mp.weixin.qq.com`，CSDN 匹配 `blog.csdn.net`。
@@ -54,6 +56,7 @@ URL 去重统一主机名大小写、国际化域名、默认端口、空路径�
 
 | 字段 | 含义 |
 |---|---|
+| `backend` / `effective_strategy` | 使用的后端与实际策略；SearXNG 的实际策略为 `instance` |
 | `results` | 标题、链接、摘要，以及 `canonical_url` 和 `provenance` |
 | `provenance`（每条结果内） | 每个命中引擎的名称、原始候选序号 `rank`（从 1 开始）、原始 URL；不是合并后的排名 |
 | `attempts` | 实际尝试的引擎；成功时有候选数、通过数、过滤数，失败时有原因 |

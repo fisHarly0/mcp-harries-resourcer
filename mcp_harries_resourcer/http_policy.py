@@ -71,16 +71,16 @@ class HTTPPolicy:
                                       retry_after_seconds=math.ceil(delay) if math.isfinite(delay) else None)
             await self.sleep(delay)
 
-    async def request(self, client, method, url, *, headers=None, pace=None):
+    async def request(self, client, method, url, *, headers=None, pace=None, follow_redirects=True):
         """GET and this server's read-only search POST only; cancellation propagates."""
         started = self.clock()
         try:
             return await wait_for_owned(
-                self._request(client, method, url, headers, pace, started), self.total_timeout)
+                self._request(client, method, url, headers, pace, started, follow_redirects), self.total_timeout)
         except asyncio.TimeoutError as exc:
             raise HTTPPolicyError("deadline", "请求总时间预算已用尽") from exc
 
-    async def _request(self, client, method, url, headers, pace, started):
+    async def _request(self, client, method, url, headers, pace, started, follow_redirects):
         deadline = started + self.total_timeout
         requests = 0
         retries_used = 0
@@ -105,6 +105,8 @@ class HTTPPolicy:
                     response = await client.send(request, stream=True, follow_redirects=False)
                     try:
                         if response.status_code in {301, 302, 303, 307, 308} and response.next_request:
+                            if not follow_redirects:
+                                raise HTTPPolicyError("redirect_blocked", "搜索实例发生 HTTP 跳转；请配置最终实例地址，不自动转发查询")
                             if redirects >= self.max_redirects:
                                 raise HTTPPolicyError("redirect_limit", "HTTP 跳转次数超过上限")
                             redirects += 1
