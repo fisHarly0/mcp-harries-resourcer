@@ -536,12 +536,25 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
                             "web_search", "web_search_multi", "search_chinese", "fetch_page",
                             "fetch_pages", "deep_research", "search_local", "save_finding",
                         })
+                        local_schema = next(t.inputSchema for t in listed.tools if t.name == "search_local")
+                        self.assertEqual(local_schema["properties"]["result_mode"]["enum"], ["lines", "files"])
                         saved = await session.call_tool("save_finding", {
                             "collection": "smoke", "title": "MCP note", "content": "Protocol workflow verified.",
                             "tags": "protocol, MCP", "source_url": "https://docs.python.org/3/",
                         })
                         self.assertFalse(saved.isError)
                         self.assertEqual(len(list((Path(tmp) / "smoke").glob("*.md"))), 1)
+                        (Path(tmp) / "noise.md").write_text("incidental MCP mention\n" * 60, encoding="utf-8")
+                        ranked = await session.call_tool("search_local", {
+                            "query": "MCP", "root": tmp, "result_mode": "files", "max_results": 1, "response_format": "json"})
+                        self.assertFalse(ranked.isError)
+                        ranked_data = json.loads("\n".join(c.text for c in ranked.content if c.type == "text"))
+                        self.assertEqual(ranked_data["matches"][0]["metadata"]["title"], "MCP note")
+                        self.assertEqual(ranked_data["matches"][0]["matched_fields"][0], "title")
+                        self.assertTrue(ranked_data["scan_complete"])
+                        self.assertTrue(ranked_data["results_truncated"])
+                        self.assertFalse(ranked_data["complete"])
+                        self.assertEqual(ranked_data["matched_files"], 2)
                         found = await session.call_tool("search_local", {"query": "Protocol workflow verified", "root": tmp})
                         self.assertFalse(found.isError)
                         self.assertIn("Protocol workflow verified", "\n".join(c.text for c in found.content if c.type == "text"))

@@ -194,6 +194,11 @@ class LocalSearchTests(unittest.TestCase):
 
 class LocalAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_cancellation_keeps_loop_responsive_and_waits_for_worker(self):
+        for mode in ("lines", "files"):
+            with self.subTest(mode=mode):
+                await self._check_cancellation(mode)
+
+    async def _check_cancellation(self, mode):
         started, release = threading.Event(), threading.Event()
         real = os.scandir
         def gated(path):
@@ -203,7 +208,7 @@ class LocalAsyncTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "note.md").write_text("needle", encoding="utf-8")
             with patch.object(local_search.os, "scandir", gated), patch.object(Path, "open", side_effect=AssertionError("cancelled scan read a file")) as opened:
-                task = asyncio.create_task(local_search.search_async("needle", tmp))
+                task = asyncio.create_task(local_search.search_async("needle", tmp, result_mode=mode))
                 self.assertTrue(await asyncio.to_thread(started.wait, 3))
                 task.cancel()
                 await asyncio.sleep(0.02)

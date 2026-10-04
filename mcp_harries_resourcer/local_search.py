@@ -9,6 +9,7 @@ import threading
 import time
 
 from .search_results import domain_matches, normalize_domains, url_identity
+from .local_results import RankedFiles, match_preview
 
 DEFAULT_EXCLUDES = ".git,node_modules,__pycache__,.venv,venv,.next,dist,build,.godot"
 DEFAULT_EXTENSIONS = "txt,md,py,js,ts,json,html,htm,csv,yaml,yml,toml,gd,godot"
@@ -71,8 +72,11 @@ def search(query: str, root: str, max_results: int = 50,
            include_ext: str = DEFAULT_EXTENSIONS, *, collection: str = "",
            tags: str = "", source_domain: str = "", exclude_dirs: str = DEFAULT_EXCLUDES,
            max_entries: int = 100000, max_file_bytes: int = 2 * 1024 * 1024,
-           time_budget_seconds: float = 10, cancelled: threading.Event | None = None) -> dict:
+           time_budget_seconds: float = 10, result_mode: str = "lines",
+           cancelled: threading.Event | None = None) -> dict:
     started = time.monotonic()
+    if result_mode not in {"lines", "files"}:
+        raise ValueError("result_mode 必须是 lines 或 files")
     for name, value, upper in (("max_results", max_results, 1000),
                                ("max_entries", max_entries, 1000000),
                                ("max_file_bytes", max_file_bytes, 16 * 1024 * 1024)):
@@ -100,6 +104,7 @@ def search(query: str, root: str, max_results: int = 50,
                             "oversized", "binary", "encoding", "io_errors", "metadata"), 0)
     stats = {"entries": 0, "files_read": 0, "files_searched": 0, "filtered_files": 0}
     hits, pending = [], [root_path]
+    ranked = RankedFiles(max_results) if result_mode == "files" else None
     stop_reason = None
 
     def expired():
@@ -159,16 +164,54 @@ def search(query: str, root: str, max_results: int = 50,
             return
         stats["files_searched"] += 1
         preview, preview_truncated = _preview_metadata(meta)
+        base = {"path": str(path), "metadata": preview, "metadata_truncated": preview_truncated}
+        fields = []
+        first_hit = None
+        matched_lines = 0
+        if ranked is not None and needle:
+            field_values = {"title": meta.get("title", ""), "filename": path.name,
+                            "tags": next((tag for tag in meta.get("tags", []) if needle in tag.casefold()), "")}
+            fields = [name for name in ("title", "tags", "filename") if needle in field_values[name].casefold()]
         for lineno, line in enumerate(lines if needle else [meta.get("title", path.name)], 1):
             if expired():
                 return
-            if not needle or needle in line.casefold():
-                hits.append({"path": str(path), "line": lineno if needle else None,
-                             "text": line.strip()[:200], "metadata": preview,
-                             "metadata_truncated": preview_truncated})
+            folded = line.casefold()
+            position = folded.find(needle) if needle else 0
+            if position >= 0:
+                matched_lines += bool(needle)
+                if ranked is not None and first_hit is not None:
+                    continue
+                window = match_preview(line, folded, position, needle, expired)
+                if window is None:
+                    return
+                hit = {**base, "line": lineno if needle else None, **window}
+                if not needle:
+                    hit["column"] = None
+                if ranked is not None:
+                    first_hit = hit
+                    continue
+                hits.append(hit)
                 if len(hits) >= max_results:
                     stop_reason = "max_results"
                     return
+        if ranked is not None:
+            if matched_lines:
+                fields.append("text")
+            if needle and not fields:
+                return
+            if first_hit is None:
+                field = fields[0]
+                value = field_values[field]
+                folded = value.casefold()
+                window = match_preview(value, folded, folded.find(needle), needle, expired)
+                if window is None:
+                    return
+                first_hit = {**base, "line": None, **window, "preview_source": field}
+            else:
+                first_hit["preview_source"] = "line" if needle else "metadata"
+            first_hit.update(matched_fields=fields, matched_lines=matched_lines)
+            priority = {"title": 4, "tags": 3, "filename": 2, "text": 1}.get(fields[0] if fields else "", 0)
+            ranked.add(first_hit, priority, path.relative_to(root_path).as_posix())
 
     while pending and not stop_reason:
         if expired():
@@ -205,16 +248,33 @@ def search(query: str, root: str, max_results: int = 50,
             skipped["io_errors"] += 1
     incomplete = bool(stop_reason or any(skipped[k] for k in ("oversized", "binary", "encoding", "io_errors"))
                       or (filtering and skipped["metadata"]))
-    return {"ok": True, "query": query, "root": str(root_path), "matches": hits,
+    selection = {}
+    if ranked is not None:
+        hits = ranked.results()
+        selection = {"scan_complete": not incomplete, "matched_files": ranked.count,
+                     "results_truncated": ranked.count > len(hits)}
+        incomplete = incomplete or selection["results_truncated"]
+    return {"ok": True, "query": query, "root": str(root_path), "matches": hits, "result_mode": result_mode,
             "complete": not incomplete, "stop_reason": stop_reason,
             "filters": {"collection": collection, "tags": sorted(requested_tags), "source_domain": domains[0] if domains else ""},
-            "stats": stats, "skipped": skipped, "elapsed_seconds": round(time.monotonic() - started, 4)}
+            "stats": stats, "skipped": skipped, "elapsed_seconds": round(time.monotonic() - started, 4), **selection}
 
 
 def format_result(result: dict) -> str:
     hits = result["matches"]
-    lines = [f"# 本地搜索：{result['query'] or '按元数据筛选'}", f"root: {result['root']}", f"命中 {len(hits)} 处"]
-    if not result["complete"]:
+    files = result.get("result_mode") == "files"
+    has_query = bool(result["query"].strip())
+    order = "标题、标签、文件名、全文依次优先" if has_query else "按相对路径排序"
+    lines = [f"# 本地搜索：{result['query'] if has_query else '按元数据筛选'}", f"root: {result['root']}",
+             f"返回 {len(hits)} 个文件（{order}）" if files else f"命中 {len(hits)} 处"]
+    if files:
+        if not result["scan_complete"]:
+            lines.append(f"扫描不完整（{result['stop_reason'] or '有文件未能搜索'}）；排序仅限已完成扫描的文件。")
+        if result["results_truncated"]:
+            lines.append(f"已检查的文件中有 {result['matched_files']} 个命中，仅展示排名前 {len(hits)} 个。")
+        if result["complete"] and not hits:
+            lines.append("在本次搜索范围内未找到匹配。")
+    elif not result["complete"]:
         lines.append(f"搜索不完整（{result['stop_reason'] or '有文件未能搜索'}）；未命中不代表目录中没有相关资料。")
     elif not hits:
         lines.append("在本次搜索范围内未找到匹配。")
@@ -224,7 +284,11 @@ def format_result(result: dict) -> str:
             current = hit["path"]
             lines.append(f"\n**{current}**")
         prefix = f"L{hit['line']}: " if hit["line"] is not None else ""
-        lines.append(f"  {prefix}{hit['text']}")
+        before = "…" if hit.get("text_start", 0) else ""
+        after = "…" if hit.get("text_end", 0) < hit.get("source_chars", 0) else ""
+        lines.append(f"  {prefix}{before}{hit['text']}{after}")
+        if files and hit["matched_fields"]:
+            lines.append("  命中字段：" + ", ".join(hit["matched_fields"]) + f"；全文命中 {hit['matched_lines']} 行")
     lines.append("\n扫描：" + json.dumps(result["stats"], ensure_ascii=False))
     lines.append("跳过：" + json.dumps({k: v for k, v in result["skipped"].items() if v}, ensure_ascii=False))
     return "\n".join(lines)

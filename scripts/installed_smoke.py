@@ -69,8 +69,12 @@ async def smoke(command):
                                                                  "tags": "MCP", "response_format": "json"}))
                     assert found["complete"] and len(found["matches"]) == 1, found
                     assert found["matches"][0]["metadata"]["collection"] == "installed", found
+                    ranked = json.loads(await call("search_local", {"query": "Wheel", "root": env["RESOURCER_RESEARCH_ROOT"],
+                                                                   "result_mode": "files", "response_format": "json"}))
+                    assert ranked["scan_complete"] and len(ranked["matches"]) == 1, ranked
+                    assert ranked["matches"][0]["matched_fields"][0] == "title", ranked
             return {"version": version.stdout.strip(), "tools": len(names), "foreign_cwd": True,
-                    "parse_subprocess": True, "declared_encoding": True, "markdown_code_and_table": True, "save_and_search": True}
+                    "parse_subprocess": True, "declared_encoding": True, "markdown_code_and_table": True, "save_and_search": True, "ranked_files": True}
     finally:
         http.shutdown()
         http.server_close()

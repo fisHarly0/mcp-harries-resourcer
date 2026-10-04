@@ -44,6 +44,8 @@ Markdown 保留所选正文的嵌套列表层级、有序列表起始编号和�
 
 本地搜索支持笔记元数据筛选、JSON 和扫描统计，在进入前排除依赖／构建目录。默认单文件上限 2 MiB、扫描预算 10 秒；达到限制或遇到无法读取的文件时明确报告不完整。参数、格式兼容和实测见 [本地资料检索](docs/local-search.md)。
 
+本地找资料时可指定 `search_local(..., result_mode="files")`，每份文件只返回一条，标题、标签、文件名命中优先于普通全文命中。默认 `lines` 仍按行返回；两种模式的长行摘要都会展示关键词附近的上下文。扫描预算、排序和结果截断见 [本地检索说明](docs/local-search.md)。
+
 ```mermaid
 flowchart LR
     Q[问题] --> S[网页搜索 / 中文站点搜索]
@@ -215,6 +217,7 @@ mcp-harries-resourcer/
 │   ├── progress.py          # 请求内进度和通知合并
 │   ├── search_content.py    # Bing／DuckDuckGo HTML 解析
 │   ├── search_results.py    # 域名筛选、URL 去重与来源合并
+│   ├── local_results.py     # 命中上下文与有界文件排序
 │   ├── local_search.py      # 本地检索、筛选和扫描限制
 │   ├── html_encoding.py     # 网页编码声明、解码与诊断
 │   ├── page_content.py      # Markdown、代码保留与引用

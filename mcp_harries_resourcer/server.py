@@ -813,13 +813,14 @@ async def search_local(
     max_file_bytes: int = 2097152,
     time_budget_seconds: float = 10,
     response_format: Literal["text", "json"] = "text",
+    result_mode: Literal["lines", "files"] = "lines",
 ) -> str:
     """本地文本搜索，可按 save_finding 保存的集合、标签和来源域名筛选。
 
     Args:
         query: 不区分大小写的子串；有元数据筛选时可留空以列出笔记
         root: 搜索根目录；只读取，不创建索引
-        max_results: 最多匹配数，1–1000；关键词搜索按行计数，纯筛选按文件计数
+        max_results: 最多匹配数，1–1000；lines 按行计数，files 或纯筛选按文件计数
         include_ext: 逗号分隔的扩展名；留空搜索所有普通文件
         collection: 原始集合名称，精确匹配、不区分大小写
         tags: 逗号分隔的标签，必须全部匹配、不区分大小写
@@ -829,6 +830,7 @@ async def search_local(
         max_file_bytes: 单文件读取上限，默认 2 MiB，最大 16 MiB
         time_budget_seconds: 协作式扫描时限，默认 10 秒，最大 600 秒
         response_format: text 或 json；含扫描统计、跳过原因和完整性
+        result_mode: lines 达到上限即停止；files 每文件一条，扫描预算内按标题、标签、文件名、全文优先排序
     """
     try:
         if response_format not in {"text", "json"}:
@@ -836,7 +838,8 @@ async def search_local(
         result = await local_search(query, root, max_results, include_ext,
                                     collection=collection, tags=tags, source_domain=source_domain,
                                     exclude_dirs=exclude_dirs, max_entries=max_entries,
-                                    max_file_bytes=max_file_bytes, time_budget_seconds=time_budget_seconds)
+                                    max_file_bytes=max_file_bytes, time_budget_seconds=time_budget_seconds,
+                                    result_mode=result_mode)
     except (ValueError, OSError) as exc:
         return _tool_error(str(exc), response_format)
     return json.dumps(result, ensure_ascii=False) if response_format == "json" else format_local(result)
