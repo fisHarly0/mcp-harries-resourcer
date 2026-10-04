@@ -31,7 +31,7 @@ def main():
         source = root / "source"
         source.mkdir()
         # Explicit source allowlist: never package local notes, env files or caches.
-        for name in ("pyproject.toml", "MANIFEST.in", "README.md", "LICENSE", "CHANGELOG.md", "requirements.txt", "server.py"):
+        for name in ("pyproject.toml", "MANIFEST.in", "README.md", "LICENSE", "CHANGELOG.md", "requirements.txt", "requirements-dev.txt", "server.py"):
             shutil.copy2(repo / name, source / name)
         for name in ("mcp_harries_resourcer", "docs", "scripts", "tests"):
             shutil.copytree(repo / name, source / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
@@ -45,7 +45,7 @@ def main():
             assert all(name.startswith(("mcp_harries_resourcer/", "mcp_harries_resourcer-")) for name in names), names
         with tarfile.open(sdist) as archive:
             names = archive.getnames()
-            for expected in ("requirements.txt", "LICENSE", "server.py", "mcp_harries_resourcer/parse_worker.py",
+            for expected in ("requirements.txt", "requirements-dev.txt", "LICENSE", "server.py", "mcp_harries_resourcer/parse_worker.py",
                              "scripts/search_cases.json", "docs/evidence/search-reference-2026-10-04.json"):
                 assert any(name.endswith("/" + expected) for name in names), expected
         environment = root / "venv"

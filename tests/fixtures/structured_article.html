@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en"><head><title>Structured deployment guide</title></head><body>
+<nav>Navigation only: accounts and advertising</nav>
+<main><article>
+<h1>Structured deployment guide</h1>
+<p>This deployment procedure resumes at step nine after the initial installation.
+Follow the nested checks in order and keep the example's indentation when copying
+the code. The expression table explains operators whose punctuation is meaningful.</p>
+<h2>Finish installation</h2>
+<ol start="9">
+  <li>Configure the client
+    <ul>
+      <li>Choose a runtime
+        <ol><li>Check the version</li><li>Read the <a href="../api/runtime">runtime guide</a></li></ol>
+      </li>
+      <li>Set <code>API_KEY</code></li>
+    </ul>
+    <p>Keep this confirmation attached to step nine.</p>
+  </li>
+  <li>Run the application
+    <ul><li>Review the output</li></ul>
+    <pre><code class="language-python">def deploy():
+    for label in ["甲", "乙"]:
+        print(label)
+
+deploy()
+</code></pre>
+    <p>Keep this explanation attached to step ten.</p>
+  </li>
+</ol>
+<h2>Expressions</h2>
+<p>Each expression below must remain in one table cell. Backslashes and backticks
+are literal syntax rather than extra columns or new formatting instructions.</p>
+<table><thead><tr><th>Expression</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>a | b</code></td><td>Union</td></tr>
+<tr><td><code>a \| b</code></td><td>Literal backslash</td></tr>
+<tr><td><code>`left` | `right`</code></td><td>Quoted operands</td></tr>
+<tr><td><strong>x | y</strong></td><td>Alternatives</td></tr>
+<tr><td></td><td>Empty expression</td></tr>
+</tbody></table>
+<p>Outside the table the literal expression is <code>a | b</code>. The
+<a href="../api/runtime">runtime guide</a> describes the supported execution environment.</p>
+</article></main><footer>Footer only: privacy and subscriptions</footer>
+</body></html>

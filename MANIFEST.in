@@ -1,4 +1,4 @@
-include server.py requirements.txt CHANGELOG.md
+include server.py requirements.txt requirements-dev.txt CHANGELOG.md
 recursive-include docs *.md
 recursive-include docs *.json
 recursive-include scripts *.py

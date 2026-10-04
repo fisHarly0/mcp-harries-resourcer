@@ -6,6 +6,8 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 import httpx
+from bs4 import BeautifulSoup
+from markdown_it import MarkdownIt
 
 from mcp_harries_resourcer.page_content import content_warnings, extract_markdown, safe_link
 from mcp_harries_resourcer import page_content
@@ -67,7 +69,9 @@ class MarkdownExtractionTests(unittest.TestCase):
             with self.subTest(wrapper=wrapper):
                 html = HTML.replace('</article>', wrapper.format(block) + '</article>')
                 result = extract_markdown(html, FINAL_URL)
-                self.assertIn('```\ndef nested():\n    return 42\n\nprint(nested())\n```', result['markdown'])
+                rendered = BeautifulSoup(MarkdownIt().render(result['markdown']), "html.parser")
+                self.assertIn('def nested():\n    return 42\n\nprint(nested())\n',
+                              [code.get_text() for code in rendered.select('pre > code')])
                 self.assertNotIn('RESOURCERPRE', result['markdown'])
                 self.assertEqual(result['structure']['code_blocks'], 2)
 

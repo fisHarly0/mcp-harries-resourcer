@@ -14,6 +14,8 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp import types
 from mcp.shared.exceptions import McpError
+from bs4 import BeautifulSoup
+from markdown_it import MarkdownIt
 
 LOCAL_HTTP_ENV = {"NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"}
 
@@ -341,10 +343,12 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
     async def test_paginated_json_and_refresh_over_mcp(self):
         state = {"version": "alpha", "requests": 0}
         article = (Path(__file__).parent / "fixtures" / "technical_article.html").read_text(encoding="utf-8")
+        structured_article = (Path(__file__).parent / "fixtures" / "structured_article.html").read_text(encoding="utf-8")
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 state["requests"] += 1
-                body = article.replace("Async worker guide", f"{state['version']} 中文资料测试").encode("utf-8")
+                source = structured_article if state["version"] == "structured" else article
+                body = source.replace("Async worker guide", f"{state['version']} 中文资料测试").encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
@@ -411,6 +415,20 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("omega", latest_md["text"])
                     self.assertNotEqual(latest_md["content_id"], md["content_id"])
                     self.assertEqual(state["requests"], 2)
+                    state["version"] = "structured"
+                    structured = await fetch(refresh=True, content_format="markdown", max_chars=0)
+                    self.assertTrue(structured["ok"])
+                    fragment = await fetch(content_format="markdown", max_chars=113)
+                    tail = await fetch(content_format="markdown", start_index=fragment["next_index"],
+                                       expected_content_id=structured["content_id"], max_chars=0)
+                    self.assertEqual(fragment["text"] + tail["text"], structured["text"])
+                    rendered = BeautifulSoup(MarkdownIt().enable("table").render(structured["text"]), "html.parser")
+                    self.assertEqual(rendered.find("ol").get("start"), "9")
+                    self.assertEqual(len(rendered.select("ol > li > ul > li > ol > li")), 2)
+                    self.assertEqual(rendered.select_one("table tbody tr td code").get_text(), "a | b")
+                    self.assertEqual(structured["structure"]["code_blocks"], 1)
+                    self.assertTrue(tail["cached"])
+                    self.assertEqual(state["requests"], 3)
         await asyncio.wait_for(workflow(), timeout=30)
 
     async def test_initialize_list_save_and_search(self):

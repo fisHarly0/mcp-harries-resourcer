@@ -31,6 +31,65 @@ def _code_markup(text: str, block: bool, language: str = "") -> str:
     return f"{fence}{padding}{text}{padding}{fence}"
 
 
+def _restore_markup(text: str, replacements: dict, protected_blocks: dict) -> tuple[str, int]:
+    for token, markup in replacements.items():
+        if token.startswith("RESOURCERLIST"):
+            text = re.sub(r"[ \t\r\n]*" + token + r"[ \t\r\n]*", lambda _: markup, text)
+        else:
+            text = text.replace(token, markup)
+    blocks = 0
+    for marker, markup in protected_blocks.items():
+        text, count = re.subn(marker + r"BEGIN.*?" + marker + "END",
+                             lambda _: "\n\n" + markup + "\n\n", text, flags=re.DOTALL)
+        blocks += count
+        text = text.replace(marker + "BEGIN", "").replace(marker + "END", "")
+    return text, blocks
+
+
+def _render_lists(body, replacements: dict, protected_blocks: dict, list_starts: dict) -> int:
+    """Render selected lists from the inside out, indenting by actual marker width."""
+    blocks = 0
+    for node in reversed(list(body.iter("list"))):
+        # Table cells use the extractor's inline rendering, not block lists.
+        if next(node.iterancestors("cell"), None) is not None:
+            continue
+        ordered = node.get("rend") == "ol"
+        number = 1
+        rendered = []
+        for item in node:
+            if item.tag != "item":
+                continue
+            content = deepcopy(item)
+            content.tag, content.tail = "p", None
+            for part in content.iter():
+                for attr in ("text", "tail"):
+                    text = getattr(part, attr) or ""
+                    for marker, start in list_starts.items():
+                        if marker in text:
+                            number = start
+                            text = text.replace(marker, "")
+                    setattr(part, attr, text or None)
+            text = xmltotxt(content, include_formatting=True).strip()
+            text, restored = _restore_markup(text, replacements, protected_blocks)
+            blocks += restored
+            lines = text.strip().splitlines() or [""]
+            # CommonMark accepts at most nine digits in a list marker; later
+            # markers need not spell the displayed counter (the renderer adds it).
+            prefix = f"{min(number, 999999999)}. " if ordered else "- "
+            rendered.append(prefix + lines[0] + "".join(
+                "\n" + (" " * len(prefix) + line if line else "") for line in lines[1:]))
+            number += 1
+        token = "RESOURCERLIST" + uuid4().hex
+        following = node.getnext()
+        separate = (following is not None and (following.text or "").startswith("RESOURCERLIST")
+                    and following.text in replacements and not (node.tail or "").strip())
+        replacements[token] = "\n\n" + "\n".join(rendered) + ("\n\n<!-- -->" if separate else "") + "\n\n"
+        tail = node.tail
+        node.clear()
+        node.tag, node.text, node.tail = "p", token, tail
+    return blocks
+
+
 def extract_markdown(html: str, final_url: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
     base = final_url
@@ -43,6 +102,18 @@ def extract_markdown(html: str, final_url: str) -> dict:
             anchor["href"] = target
         else:
             del anchor["href"]
+
+    list_starts = {}
+    for ordered in soup.find_all("ol", start=True):
+        first = ordered.find("li", recursive=False)
+        try:
+            start = int(ordered["start"])
+        except (ValueError, TypeError):
+            continue
+        if first is not None and 0 <= start <= 999999999:
+            marker = "RESOURCERSTART" + uuid4().hex
+            list_starts[marker] = start
+            first.insert(0, marker)
 
     protected_blocks = {}
     for pre in soup.find_all("pre"):
@@ -92,6 +163,10 @@ def extract_markdown(html: str, final_url: str) -> dict:
             continue
         block = parent.tag not in {"p", "head", "item", "cell", "hi", "ref"} or "\n" in text
         token = "RESOURCERCODE" + uuid4().hex
+        if next(node.iterancestors("cell"), None) is not None:
+            # GFM splits table cells before parsing code spans. Restored code
+            # must escape pipes too; the renderer only sees our opaque token.
+            text = text.replace("|", r"\|")
         replacements[token] = _code_markup(text, block)
         for child in list(node):
             node.remove(child)
@@ -104,14 +179,11 @@ def extract_markdown(html: str, final_url: str) -> dict:
     for node in body.iter("code"):
         if any(marker in "".join(node.itertext()) for marker in protected_blocks):
             node.tag = "span"
-    markdown = xmltotxt(body, include_formatting=True)
-    for token, markup in replacements.items():
-        markdown = markdown.replace(token, markup)
-    for marker, markup in protected_blocks.items():
-        markdown, count = re.subn(marker + r"BEGIN.*?" + marker + "END",
-                                  lambda _: "\n\n" + markup + "\n\n", markdown, flags=re.DOTALL)
-        code_blocks += count
-        markdown = markdown.replace(marker + "BEGIN", "").replace(marker + "END", "")
+    code_blocks += _render_lists(body, replacements, protected_blocks, list_starts)
+    markdown, restored = _restore_markup(xmltotxt(body, include_formatting=True), replacements, protected_blocks)
+    code_blocks += restored
+    for marker in list_starts:
+        markdown = markdown.replace(marker, "")
     return {"markdown": markdown.strip(), "references": references,
             "references_truncated": len(seen) > len(references),
             "structure": {"code_blocks": code_blocks, "tables": tables, "links": len(seen)}}

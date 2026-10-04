@@ -1,0 +1,4 @@
+-r requirements.txt
+build>=1,<2
+# Independent CommonMark/GFM rendering checks; not a runtime dependency.
+markdown-it-py>=3,<5

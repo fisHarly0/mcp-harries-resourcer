@@ -28,6 +28,8 @@ Resourcer 是一个轻量 MCP 资料工具，把网页搜索、正文提取和�
 
 阅读技术文档时可用 `content_format="markdown"`，保留提取到的标题、代码块、表格和链接。JSON 还提供正文引用索引、结构统计和简易异常提示；两种正文格式共享同一次下载，使用各自的版本标识。示例与限制见 [Markdown 与引用](docs/content.md)。
 
+Markdown 保留所选正文的嵌套列表层级、有序列表起始编号和列表内代码缩进；表格里的 `a | b` 等行内代码也保持在一个单元格内。复杂合并单元格等布局仍需按原文核对。
+
 正文在独立 Python 进程中解析，默认最多同时解析 2 页、每页解析预算 20 秒（含排队与启动）。超时或取消会终止并回收对应解析进程，复杂正文不会一直占住主事件循环。进程启动和内存开销、时间边界见 [解析隔离](docs/parsing.md)。
 
 支持进度的 MCP 客户端可以接收搜索与读取通知：批量调用按已结束的查询／不同 URL 计数，调研先报告搜索阶段，再报告网页读取进度。成功与失败分别说明，整批到期不会把剩余项补成完成。启用方式与计数规则见 [进度反馈](docs/progress.md)。
@@ -182,10 +184,11 @@ claude mcp add --scope user resourcer -e RESOURCER_RESEARCH_ROOT=D:\research -- 
 
 ```powershell
 # 使用安装依赖的同一个 Python
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-macOS / Linux 使用 `.venv/bin/python -m unittest discover -s tests -v`。
+macOS / Linux 先用 `.venv/bin/python -m pip install -r requirements-dev.txt` 安装开发依赖，再执行 `.venv/bin/python -m unittest discover -s tests -v`。其中独立 Markdown 渲染器只用于验证输出结构，不属于服务运行依赖。
 
 测试使用固定 HTML 样本、模拟 HTTP 响应和可控时钟，覆盖 URL 解码、去重、无结果、验证码、限流、超时、引擎切换、正文失败、共享限速、缓存过期与淘汰、请求取消、保存和本地检索；MCP 测试还会启动真实 stdio 子进程。测试不会向真实搜索引擎发请求，固定样本不保证引擎未来页面保持不变。GitHub Actions 配置了 Windows / Linux 与 Python 3.10 / 3.12 的检查。
 
