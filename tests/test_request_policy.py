@@ -164,10 +164,14 @@ class FetchPolicyTests(unittest.IsolatedAsyncioTestCase):
         clock = Clock()
         policy = RequestPolicy(fetch_rpm=60, clock=clock, sleep=clock.sleep)
         starts = []
-        async def loader():
+        def handler(request):
             starts.append(clock())
-            return page()
-        await asyncio.gather(*(policy.fetch(str(i), loader) for i in range(3)))
+            return httpx.Response(200, text="Body")
+        async with REAL_CLIENT(transport=httpx.MockTransport(handler)) as client:
+            async def loader():
+                response = await policy.http.request(client, "GET", "https://example.org", pace=policy.fetch_pacer.wait)
+                return page(response.text)
+            await asyncio.gather(*(policy.fetch(str(i), loader) for i in range(3)))
         self.assertEqual(starts, [100, 101, 102])
 
     async def test_separate_batches_share_global_concurrency(self):

@@ -8,6 +8,7 @@ import httpx
 
 import server
 from request_policy import RequestPolicy
+from http_policy import HTTPPolicy
 
 
 REAL_CLIENT = httpx.AsyncClient
@@ -24,7 +25,7 @@ class ReadingTests(unittest.IsolatedAsyncioTestCase):
         def client_factory(**kwargs):
             return REAL_CLIENT(transport=httpx.MockTransport(handler))
         patches = [
-            patch.object(server, "NETWORK", RequestPolicy(search_rpm=0, fetch_rpm=0)),
+            patch.object(server, "NETWORK", RequestPolicy(search_rpm=0, fetch_rpm=0, http_policy=HTTPPolicy(retries=0))),
             patch.object(server.httpx, "AsyncClient", side_effect=client_factory),
             patch.object(server.trafilatura, "extract", side_effect=lambda *a, **k: self.article),
         ]

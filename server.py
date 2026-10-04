@@ -31,6 +31,7 @@ from bs4 import BeautifulSoup
 from mcp.server.fastmcp import FastMCP
 
 from request_policy import RequestPolicy
+from http_policy import HTTPPolicyError
 from search_results import merge_results, normalize_domains, select_results, url_identity
 
 mcp = FastMCP("resourcer")
@@ -164,8 +165,8 @@ def _parse_search_response(response: httpx.Response, engine: str, max_results: i
 
 async def _ddg(client: httpx.AsyncClient, query: str, max_results: int) -> list[dict]:
     url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
-    await NETWORK.wait_for_search("ddg")
-    response = await client.post(url, headers={"User-Agent": UA})
+    response = await NETWORK.http.request(client, "POST", url, headers={"User-Agent": UA},
+                                          pace=lambda: NETWORK.wait_for_search("ddg"))
     return _parse_search_response(response, "ddg", max_results)
 
 
@@ -177,14 +178,16 @@ async def _bing(client: httpx.AsyncClient, query: str, max_results: int, mkt: st
     """使用 cn.bing.com，靠 mkt 切换语言偏好。"""
     url = f"https://cn.bing.com/search?q={quote_plus(query)}&count={max_results}&mkt={mkt}"
     accept_lang = "zh-CN,zh;q=0.9,en;q=0.8" if mkt.startswith("zh") else "en-US,en;q=0.9,zh;q=0.5"
-    await NETWORK.wait_for_search("bing")
-    response = await client.get(url, headers={"User-Agent": UA, "Accept-Language": accept_lang})
+    response = await NETWORK.http.request(client, "GET", url,
+                                          headers={"User-Agent": UA, "Accept-Language": accept_lang},
+                                          pace=lambda: NETWORK.wait_for_search("bing"))
     # Some regions redirect cn.bing.com/search to the www homepage, losing /search.
     # Retry the canonical search route once instead of parsing the homepage as results.
     if response.url.host in {"bing.com", "www.bing.com", "cn.bing.com"} and response.url.path in {"", "/"}:
         canonical_url = f"https://www.bing.com/search?q={quote_plus(query)}&count={max_results}&mkt={mkt}"
-        await NETWORK.wait_for_search("bing")
-        response = await client.get(canonical_url, headers={"User-Agent": UA, "Accept-Language": accept_lang})
+        response = await NETWORK.http.request(client, "GET", canonical_url,
+                                              headers={"User-Agent": UA, "Accept-Language": accept_lang},
+                                              pace=lambda: NETWORK.wait_for_search("bing"))
     return _parse_search_response(response, "bing", max_results)
 
 
@@ -226,12 +229,14 @@ async def _search(query: str, max_results: int, strategy: str = "fallback",
         async def attempt(name, fetch):
             failure = ""
             try:
-                res = await fetch()
+                res = await asyncio.wait_for(fetch(), NETWORK.http.total_timeout)
                 selected, rejected = select_results(res, name, include, exclude)
                 return selected, {"engine": name, "status": "success", "returned": len(res),
                                   "accepted": len(selected), "filtered": rejected}, ""
-            except httpx.TimeoutException:
+            except (httpx.TimeoutException, asyncio.TimeoutError):
                 failure = "请求超时"
+            except HTTPPolicyError as exc:
+                failure = str(exc)
             except httpx.HTTPStatusError as exc:
                 failure = f"HTTP {exc.response.status_code}"
             except httpx.RequestError:
@@ -319,7 +324,12 @@ async def _fetch_one(client: httpx.AsyncClient, url: str, max_chars: int,
                      start_index: int = 0, refresh: bool = False) -> dict:
     if max_chars < 0 or start_index < 0:
         raise ValueError("max_chars 和 start_index 必须是非负整数")
-    result = await NETWORK.fetch(url, lambda: _fetch_uncached(client, url), refresh=refresh)
+    try:
+        result = await asyncio.wait_for(
+            NETWORK.fetch(url, lambda: _fetch_uncached(client, url), refresh=refresh), NETWORK.http.total_timeout)
+    except asyncio.TimeoutError:
+        result = {"url": url, "ok": False, "error": "抓取总时间预算已用尽（含排队与等待）",
+                  "error_code": "deadline", "title": "", "text": ""}
     return _slice_page(result, start_index, max_chars or None)
 
 
@@ -349,11 +359,16 @@ def _cache_note(result: dict) -> str:
 
 async def _fetch_uncached(client: httpx.AsyncClient, url: str) -> dict:
     try:
-        r = await client.get(url, headers={"User-Agent": UA})
+        r = await NETWORK.http.request(client, "GET", url, headers={"User-Agent": UA},
+                                       pace=NETWORK.fetch_pacer.wait)
+    except HTTPPolicyError as e:
+        return {"url": url, "ok": False, "error": str(e), "error_code": e.code,
+                "retry_after_seconds": e.retry_after_seconds, "title": "", "text": ""}
     except Exception as e:
         return {"url": url, "ok": False, "error": str(e), "title": "", "text": ""}
     if r.status_code != 200:
-        return {"url": url, "ok": False, "error": f"HTTP {r.status_code}", "title": "", "text": ""}
+        return {"url": url, "ok": False, "error": f"HTTP {r.status_code}", "error_code": "http_status",
+                "request_info": r.extensions.get("resourcer", {}), "title": "", "text": ""}
 
     try:
         text = trafilatura.extract(
@@ -376,6 +391,7 @@ async def _fetch_uncached(client: httpx.AsyncClient, url: str) -> dict:
         "final_url": str(r.url),
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "content_id": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        "request_info": r.extensions.get("resourcer", {}),
     }
 
 

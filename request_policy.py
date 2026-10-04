@@ -7,11 +7,13 @@ import logging
 import os
 import time
 
+from http_policy import HTTPPolicy
 
-def _setting(name: str, default: int, maximum: int) -> int:
+
+def _setting(name: str, default: int, maximum: int, minimum: int = 0) -> int:
     try:
         value = int(os.environ.get(name, str(default)))
-        if 0 <= value <= maximum:
+        if minimum <= value <= maximum:
             return value
     except ValueError:
         pass
@@ -98,7 +100,9 @@ class RequestPolicy:
     """One instance per server event loop; no persistent cache or extra worker tasks."""
 
     def __init__(self, search_rpm=30, fetch_rpm=60, cache_ttl=300, cache_entries=64,
-                 cache_bytes=8 * 1024 * 1024, fetch_concurrency=5, *, clock=time.monotonic, sleep=asyncio.sleep):
+                 cache_bytes=8 * 1024 * 1024, fetch_concurrency=5, *, clock=time.monotonic,
+                 sleep=asyncio.sleep, http_policy=None):
+        self.http = http_policy if http_policy is not None else HTTPPolicy(clock=clock, sleep=sleep)
         self.search_pacers = {engine: RequestPacer(search_rpm, clock=clock, sleep=sleep) for engine in ("ddg", "bing")}
         self.fetch_pacer = RequestPacer(fetch_rpm, clock=clock, sleep=sleep)
         self.fetch_slots = asyncio.Semaphore(fetch_concurrency)
@@ -113,6 +117,11 @@ class RequestPolicy:
             cache_ttl=_setting("RESOURCER_CACHE_TTL_SECONDS", 300, 86400),
             cache_entries=_setting("RESOURCER_CACHE_MAX_ENTRIES", 64, 4096),
             cache_bytes=_setting("RESOURCER_CACHE_MAX_BYTES", 8 * 1024 * 1024, 512 * 1024 * 1024),
+            http_policy=HTTPPolicy(
+                total_timeout=_setting("RESOURCER_REQUEST_TIMEOUT_SECONDS", 60, 300, 1),
+                max_bytes=_setting("RESOURCER_RESPONSE_MAX_BYTES", 8 * 1024 * 1024, 64 * 1024 * 1024, 1024),
+                retries=_setting("RESOURCER_HTTP_RETRIES", 1, 3),
+            ),
         )
 
     async def wait_for_search(self, engine):
@@ -139,7 +148,6 @@ class RequestPolicy:
             self.inflight[url] = flight
             try:
                 async with self.fetch_slots:
-                    await self.fetch_pacer.wait()
                     result = {**await loader(), "cached": False, "cache_age_seconds": 0}
                 self.cache.put(url, result)
                 flight.set_result(result)

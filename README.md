@@ -10,7 +10,7 @@ Resourcer 是一个轻量 MCP 资料工具，把网页搜索、正文提取和�
 
 不需要搜索 API Key。服务通过 stdio 运行；网页搜索和抓取仍会向搜索引擎及目标网站发送网络请求。支持 Claude Code，以及能启动 stdio MCP 服务的其他客户端。
 
-[快速开始](#快速开始) · [使用演示](docs/usage-example.md) · [搜索与来源筛选](docs/search.md) · [分页与 JSON](docs/reading.md) · [工具列表](#工具) · [配置](#限速与正文缓存) · [优化路线](docs/roadmap.md)
+[快速开始](#快速开始) · [使用演示](docs/usage-example.md) · [搜索与来源筛选](docs/search.md) · [分页与 JSON](docs/reading.md) · [网络恢复与限制](docs/network.md) · [工具列表](#工具) · [配置](#限速与正文缓存) · [优化路线](docs/roadmap.md)
 
 ## 适合做什么
 
@@ -19,6 +19,8 @@ Resourcer 是一个轻量 MCP 资料工具，把网页搜索、正文提取和�
 - **积累笔记**：把整理后的内容写进本地 Markdown 文件，再按关键词找回文件和具体行号。
 
 内置跨调用限速、最多 5 路正文抓取和有容量上限的短时缓存。重复读取可以复用完整正文，保存同名资料不会覆盖旧文件。
+
+网络请求支持有限重试、`Retry-After` 等待、总时间预算和响应大小限制。大页面、解压后超限的响应或持续缓慢的下载会明确报错，不会把部分正文当作完整资料保存到缓存。
 
 长文支持分页续读和正文版本校验；需要新内容时可单次刷新。单页、批量和调研工具支持 JSON 输出，调研资料包可限制正文总长度，按需读取剩余页面。
 
@@ -118,6 +120,9 @@ claude mcp add --scope user resourcer -e RESOURCER_RESEARCH_ROOT=D:\research -- 
 | `RESOURCER_CACHE_TTL_SECONDS` | `300` | 成功正文缓存 5 分钟；命中不延长有效期 |
 | `RESOURCER_CACHE_MAX_ENTRIES` | `64` | 最多缓存 64 个 URL，容量不足时淘汰最久未使用项 |
 | `RESOURCER_CACHE_MAX_BYTES` | `8388608` | 缓存 URL、标题、正文的 UTF-8 内容预算，默认 8 MiB；不含 Python 对象开销 |
+| `RESOURCER_HTTP_RETRIES` | `1` | 可重试 HTTP 状态或网络故障最多追加尝试次数，范围 0–3 |
+| `RESOURCER_REQUEST_TIMEOUT_SECONDS` | `60` | 每个引擎尝试／单页抓取的异步时间预算，含重试等待；范围 1–300 秒 |
+| `RESOURCER_RESPONSE_MAX_BYTES` | `8388608` | 单个响应的传输数据及解压后数据上限，默认各 8 MiB；范围 1024–67108864 字节 |
 
 速率值设为 `0` 可关闭对应限速；任一缓存值设为 `0` 可关闭跨调用缓存。非法值会在 stderr 记录警告并使用默认值。设置修改后需要重新连接服务。
 
@@ -126,7 +131,9 @@ claude mcp add --scope user resourcer -e RESOURCER_RESEARCH_ROOT=D:\research -- 
 - 失败页面和超过单个缓存总容量的正文不缓存；页面过期后重新抓取。
 - 同时抓取相同 URL 时共享进行中的下载，即使关闭缓存也能减少同一时刻的重复请求。
 - 命中缓存时输出标明“正文来自进程内缓存”和年龄；单次刷新可用 `refresh=true`，需要每次重新抓取时设置 `RESOURCER_CACHE_TTL_SECONDS=0`。
-- 缓存只存在内存，服务退出即清空。限速针对主动发起的请求，HTTP 自动跳转属于同一次请求链；不会保证目标站点不再限流。
+- 缓存只存在内存，服务退出即清空。初次请求、重试和每次 HTTP 跳转都会经过限速；每次尝试最多跟随 5 次跳转。限速不会保证目标站点不再限流。
+- `429/502/503/504` 或部分连接、读取故障默认最多重试一次。遵守 `Retry-After` 的秒数或日期；等待超过剩余预算时不提前重试，同一来源的后续调用也会受等待期约束。
+- 时间和响应大小限制不能设为 0。预算与错误码的准确范围见 [网络恢复与限制](docs/network.md)，批量工具目前没有整批总时限。
 
 ## 如何理解搜索结果
 
@@ -139,6 +146,8 @@ claude mcp add --scope user resourcer -e RESOURCER_RESEARCH_ROOT=D:\research -- 
 | 限流（HTTP 429） | 降低频率，稍后重试；服务会先尝试后备引擎 |
 | 解析失败 | 未识别结果页结构，可能是引擎改版或拦截；保留诊断以便排查 |
 | 抓取失败 / 无法提取正文 | 页面可能要求登录、依赖 JavaScript、限制访问，或不是可提取的 HTML |
+| 响应体超过上限 | 下载或解压后的数据太大；不会返回、解析或缓存部分正文 |
+| 请求总时间预算已用尽 / 站点仍在限流等待期 | 本次等待已达到预算，或网站要求更长等待；稍后再试 |
 
 若客户端无法连接，先用配置中的 Python 执行 `-m pip show mcp httpx trafilatura beautifulsoup4`，核对解释器和依赖；再检查 `server.py` 的绝对路径。手动运行 `server.py` 后等待输入是正常现象，它不是交互式终端程序。
 
@@ -165,6 +174,7 @@ macOS / Linux 使用 `.venv/bin/python -m unittest discover -s tests -v`。
 mcp-harries-resourcer/
 ├── server.py              # 8 个 MCP 工具、搜索解析与资料保存
 ├── request_policy.py      # 请求限速、缓存和重复下载复用
+├── http_policy.py         # 有界下载、重试、跳转和站点等待期
 ├── search_results.py      # 域名筛选、URL 去重与来源合并
 ├── requirements.txt       # Python 依赖
 ├── docs/                  # 使用示例、项目对比与验证记录

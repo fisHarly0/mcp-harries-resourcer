@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 import server
+from http_policy import HTTPPolicy
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -76,7 +77,8 @@ class ParserTests(unittest.TestCase):
 
 class SearchTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        policy = patch.object(server, "NETWORK", server.RequestPolicy(search_rpm=0, fetch_rpm=0))
+        policy = patch.object(server, "NETWORK", server.RequestPolicy(
+            search_rpm=0, fetch_rpm=0, http_policy=HTTPPolicy(retries=0)))
         policy.start()
         self.addCleanup(policy.stop)
 

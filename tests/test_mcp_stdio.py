@@ -1,5 +1,6 @@
 """Exercise the actual MCP wire protocol without external network access."""
 import asyncio
+import gzip
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -14,6 +15,85 @@ from mcp.client.stdio import stdio_client
 
 
 class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
+    async def test_network_recovery_and_limits_over_mcp(self):
+        counts = {}
+        stop = threading.Event()
+        article = ("<html><title>Network fixture</title><article><h1>Network fixture</h1><p>" +
+                   "A useful article with enough text to extract and verify network recovery. " * 12 +
+                   "</p></article></html>").encode()
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                counts[self.path] = counts.get(self.path, 0) + 1
+                if self.path == "/retry" and counts[self.path] == 1:
+                    self.send_response(503)
+                    self.send_header("Retry-After", "0")
+                    self.end_headers()
+                    return
+                if self.path == "/cooldown":
+                    self.send_response(429)
+                    self.send_header("Retry-After", "60")
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                if self.path == "/large":
+                    self.send_header("Content-Length", "1000000")
+                if self.path == "/gzip":
+                    self.send_header("Content-Encoding", "gzip")
+                self.end_headers()
+                try:
+                    if self.path == "/slow":
+                        while not stop.wait(0.1):
+                            self.wfile.write(b"slow but still sending ")
+                            self.wfile.flush()
+                    elif self.path == "/gzip":
+                        self.wfile.write(gzip.compress(b"x" * 100000))
+                    else:
+                        self.wfile.write(article)
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    pass
+
+            def log_message(self, *args):
+                pass
+
+        http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=http.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(http.server_close)
+        self.addCleanup(http.shutdown)
+        self.addCleanup(stop.set)
+        base = f"http://127.0.0.1:{http.server_port}"
+        params = StdioServerParameters(command=sys.executable,
+            args=[str(Path(__file__).resolve().parents[1] / "server.py")],
+            env={**os.environ, "RESOURCER_FETCH_RPM": "0", "RESOURCER_HTTP_RETRIES": "1",
+                 "RESOURCER_REQUEST_TIMEOUT_SECONDS": "3", "RESOURCER_RESPONSE_MAX_BYTES": "2048"})
+
+        async def workflow():
+            async with stdio_client(params) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    async def fetch(path):
+                        result = await session.call_tool("fetch_page", {"url": base + path, "response_format": "json"})
+                        self.assertFalse(result.isError)
+                        return json.loads("\n".join(c.text for c in result.content if c.type == "text"))
+                    recovered = await fetch("/retry")
+                    self.assertTrue(recovered["ok"], recovered)
+                    self.assertEqual(recovered["request_info"]["retries"], 1)
+                    self.assertEqual(counts["/retry"], 2)
+                    for path, code in [("/large", "response_too_large"), ("/gzip", "response_too_large"),
+                                       ("/slow", "deadline")]:
+                        data = await fetch(path)
+                        self.assertFalse(data["ok"])
+                        self.assertEqual(data["error_code"], code)
+                        self.assertEqual(data["text"], "")
+                    limited = await fetch("/cooldown")
+                    self.assertEqual(limited["error"], "HTTP 429")
+                    blocked = await fetch("/after-cooldown")
+                    self.assertEqual(blocked["error_code"], "cooldown")
+                    self.assertNotIn("/after-cooldown", counts)
+        await asyncio.wait_for(workflow(), 30)
+
     async def test_search_controls_over_mcp(self):
         params = StdioServerParameters(command=sys.executable, args=[
             str(Path(__file__).parent / "fixtures" / "search_stdio.py")], env=dict(os.environ))
