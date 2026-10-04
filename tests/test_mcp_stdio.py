@@ -60,8 +60,10 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
                         return json.loads("\n".join(c.text for c in result.content if c.type == "text"))
                     first = await call("fetch_page", url=base + "/fast")
                     self.assertTrue(first["ok"])
-                    data = await call("fetch_pages", urls=[base + "/fast", base + "/slow", base + "/fast"], time_budget_seconds=1)
-                    self.assertEqual(data["successful"], 2)
+                    # Allow cold HTTP client setup on Windows; the slow stream
+                    # cannot finish until released, regardless of this allowance.
+                    data = await call("fetch_pages", urls=[base + "/fast", base + "/slow", base + "/fast"], time_budget_seconds=5)
+                    self.assertEqual(data["successful"], 2, data)
                     self.assertEqual(data["pages"][0]["text"], first["text"])
                     self.assertEqual(data["pages"][1]["error_code"], "batch_deadline")
                     self.assertEqual(data["unfinished_urls"], [base + "/slow"])
@@ -202,13 +204,11 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_paginated_json_and_refresh_over_mcp(self):
         state = {"version": "alpha", "requests": 0}
+        article = (Path(__file__).parent / "fixtures" / "technical_article.html").read_text(encoding="utf-8")
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 state["requests"] += 1
-                body = ("<html><head><title>Local reading test</title></head><body><article>"
-                        "<h1>Local reading test</h1><p>" +
-                        (f"{state['version']} 中文资料测试，分段读取应保留完整正文与版本信息。 " * 12) +
-                        "</p></article></body></html>").encode("utf-8")
+                body = article.replace("Async worker guide", f"{state['version']} 中文资料测试").encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
@@ -238,6 +238,9 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
                     schema = next(t.inputSchema for t in listed.tools if t.name == "fetch_page")
                     self.assertIn("expected_content_id", schema["properties"])
                     self.assertEqual(schema["properties"]["response_format"]["enum"], ["text", "json"])
+                    for name in ["fetch_page", "fetch_pages", "deep_research"]:
+                        schema = next(t.inputSchema for t in listed.tools if t.name == name)
+                        self.assertEqual(schema["properties"]["content_format"]["enum"], ["text", "markdown"])
                     async def fetch(**options):
                         result = await session.call_tool("fetch_page", {"url": url, "response_format": "json", **options})
                         self.assertFalse(result.isError)
@@ -248,6 +251,19 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(first["text"] + rest["text"], full["text"])
                     self.assertTrue(rest["cached"])
                     self.assertEqual(state["requests"], 1)
+                    md = await fetch(content_format="markdown", max_chars=0)
+                    self.assertTrue(md["ok"])
+                    self.assertIn('```python\nasync def main():\n    for item in ["甲", "乙"]:', md["text"])
+                    self.assertEqual(md["structure"]["tables"], 1)
+                    self.assertEqual(len(md["references"]), 2)
+                    self.assertNotEqual(md["content_id"], full["content_id"])
+                    fragment = await fetch(content_format="markdown", max_chars=97)
+                    tail = await fetch(content_format="markdown", start_index=fragment["next_index"],
+                                       expected_content_id=md["content_id"], max_chars=0)
+                    self.assertEqual(fragment["text"] + tail["text"], md["text"])
+                    wrong_format = await fetch(expected_content_id=md["content_id"])
+                    self.assertFalse(wrong_format["ok"])
+                    self.assertEqual(state["requests"], 1)
                     state["version"] = "omega"
                     changed = await fetch(refresh=True, expected_content_id=first["content_id"])
                     self.assertFalse(changed["ok"])
@@ -255,6 +271,9 @@ class MCPStdioTests(unittest.IsolatedAsyncioTestCase):
                     latest = await fetch()
                     self.assertTrue(latest["ok"])
                     self.assertIn("omega", latest["text"])
+                    latest_md = await fetch(content_format="markdown")
+                    self.assertIn("omega", latest_md["text"])
+                    self.assertNotEqual(latest_md["content_id"], md["content_id"])
                     self.assertEqual(state["requests"], 2)
         await asyncio.wait_for(workflow(), timeout=30)
 

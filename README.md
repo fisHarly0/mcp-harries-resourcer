@@ -26,6 +26,8 @@ Resourcer 是一个轻量 MCP 资料工具，把网页搜索、正文提取和�
 
 长文支持分页续读和正文版本校验；需要新内容时可单次刷新。单页、批量和调研工具支持 JSON 输出，调研资料包可限制正文总长度，按需读取剩余页面。
 
+阅读技术文档时可用 `content_format="markdown"`，保留提取到的标题、代码块、表格和链接。JSON 还提供正文引用索引、结构统计和简易异常提示；两种正文格式共享同一次下载，使用各自的版本标识。示例与限制见 [Markdown 与引用](docs/content.md)。
+
 搜索支持包含／排除域名，并逐条校验返回链接。需要扩大来源覆盖时，可选择 `strategy="merge"` 同时查询两个引擎；去重后保留各引擎的原始链接和排名。搜索工具也支持 JSON 输出。
 
 ```mermaid
@@ -92,7 +94,7 @@ claude mcp list
 | `web_search` | 默认依次切换引擎，可选双引擎合并；包含／排除域名、来源排名和 JSON |
 | `web_search_multi` | 并发搜索多个关键词、跨查询去重；支持域名筛选、整批时间预算及部分结果，JSON 保留关联查询 |
 | `search_chinese` | 知乎、B站、微信公众号、简书、CSDN、雪球定向搜索，校验实际返回域名 |
-| `fetch_page` | 单页正文、分页续读、版本校验、单次刷新；支持 JSON 元数据 |
+| `fetch_page` | 纯文本或 Markdown 正文、引用索引、分页续读、版本校验、单次刷新；支持 JSON 元数据 |
 | `fetch_pages` | 批量正文与刷新；共享最多 5 个抓取名额和限速，到整批时限后返回已完成正文与未完成 URL |
 | `deep_research` | 搜索和前 N 条正文抓取共用整批时限，支持双引擎合并和总正文预算；支持 JSON，不自动总结或保存 |
 | `search_local` | 在指定本地目录搜索文本，返回文件路径和行号 |
@@ -121,7 +123,7 @@ claude mcp add --scope user resourcer -e RESOURCER_RESEARCH_ROOT=D:\research -- 
 | `RESOURCER_FETCH_RPM` | `60` | 所有正文主动抓取的总速率，默认相邻请求至少间隔 1 秒 |
 | `RESOURCER_CACHE_TTL_SECONDS` | `300` | 成功正文缓存 5 分钟；命中不延长有效期 |
 | `RESOURCER_CACHE_MAX_ENTRIES` | `64` | 最多缓存 64 个 URL，容量不足时淘汰最久未使用项 |
-| `RESOURCER_CACHE_MAX_BYTES` | `8388608` | 缓存 URL、标题、正文的 UTF-8 内容预算，默认 8 MiB；不含 Python 对象开销 |
+| `RESOURCER_CACHE_MAX_BYTES` | `8388608` | 缓存 URL、标题、两种格式正文及引用索引的 UTF-8 内容预算，默认 8 MiB；不含 Python 对象开销 |
 | `RESOURCER_HTTP_RETRIES` | `1` | 可重试 HTTP 状态或网络故障最多追加尝试次数，范围 0–3 |
 | `RESOURCER_REQUEST_TIMEOUT_SECONDS` | `60` | 每个引擎尝试／单页抓取的异步时间预算，含重试等待；范围 1–300 秒 |
 | `RESOURCER_RESPONSE_MAX_BYTES` | `8388608` | 单个响应的传输数据及解压后数据上限，默认各 8 MiB；范围 1024–67108864 字节 |
@@ -129,7 +131,7 @@ claude mcp add --scope user resourcer -e RESOURCER_RESEARCH_ROOT=D:\research -- 
 速率值设为 `0` 可关闭对应限速；任一缓存值设为 `0` 可关闭跨调用缓存。非法值会在 stderr 记录警告并使用默认值。设置修改后需要重新连接服务。
 
 - 搜索结果不缓存，正文按完整 URL 匹配；不同查询参数视为不同页面。
-- 缓存保存完整提取正文；每次调用再按 `max_chars` 截取，因此先读短摘要不会影响后续读全文。
+- 缓存保存完整的纯文本、Markdown 正文和引用索引；每次调用再按 `max_chars` 截取，因此先读短摘要不会影响后续读全文。一次下载会提取两种格式，增加解析工作和单页缓存占用，但切换格式无需重复下载。
 - 失败页面和超过单个缓存总容量的正文不缓存；页面过期后重新抓取。
 - 同时抓取相同 URL 时共享进行中的下载，即使关闭缓存也能减少同一时刻的重复请求。
 - 命中缓存时输出标明“正文来自进程内缓存”和年龄；单次刷新可用 `refresh=true`，需要每次重新抓取时设置 `RESOURCER_CACHE_TTL_SECONDS=0`。
@@ -180,6 +182,7 @@ mcp-harries-resourcer/
 ├── http_policy.py         # 有界下载、重试、跳转和站点等待期
 ├── batch_budget.py        # 整批截止时间、有限工作任务和部分结果
 ├── search_results.py      # 域名筛选、URL 去重与来源合并
+├── page_content.py        # Markdown、代码保留、引用索引和内容提示
 ├── requirements.txt       # Python 依赖
 ├── docs/                  # 使用示例、项目对比与验证记录
 ├── tests/                 # 回归测试与固定 HTML 样本

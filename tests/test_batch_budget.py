@@ -200,7 +200,7 @@ class BatchToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_research_partial_bodies_still_obey_character_budget(self):
         urls = ["https://example.org/fast", "https://example.org/slow"]
-        async def fetch(client, url, max_chars):
+        async def fetch(client, url, max_chars, **options):
             if url.endswith("fast"):
                 return page(url)
             await asyncio.Event().wait()

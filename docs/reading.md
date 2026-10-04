@@ -19,7 +19,7 @@
 ## 正文版本与刷新
 
 - 缓存命中时显示 `cached=true` 和 `cache_age_seconds`，`fetched_at` 仍是原始抓取时间。
-- `content_id` 是完整提取正文的 SHA-256，与本次截取长度无关。
+- `content_id` 是完整提取正文的 SHA-256 版本标识，与本次截取长度无关。Markdown 使用独立的格式前缀生成哈希；两种格式的版本不可混用。
 - 携带 `expected_content_id` 后，如果缓存到期或刷新发现正文改变，返回 `ok=false` 并要求从头读取，不混用新旧版本。
 - 设置 `refresh=true` 可丢弃这一个 URL 的已完成缓存，重新抓取。同 URL 已经有进行中的请求时，仍会复用该请求。
 - 刷新失败会返回错误，不把旧缓存伪装成最新内容。
@@ -34,6 +34,11 @@
 | `ok` / `error` | 页面是否成功；失败时先处理错误，不拼接正文 |
 | `url` / `final_url` | 请求 URL / HTTP 跳转后的实际 URL |
 | `title` / `text` | 页面标题 / 本次返回的正文片段 |
+| `content_format` | 正文格式：`text` 或 `markdown`，默认 `text` |
+| `references` / `references_truncated` | 完整 Markdown 正文中的 HTTP(S) 引用索引 / 索引是否超出 100 条上限 |
+| `structure` | 提取到的 Markdown 全文的代码块、表格、唯一链接数量；不是当前片段的数量 |
+| `extractor` / `extractor_version` | 正文提取器及版本，方便复现差异 |
+| `warnings` | 简易异常提示，如短正文、替换字符、缺少标题；不代表来源质量评分 |
 | `fetched_at` | 抓取并提取完成的 UTC 时间 |
 | `content_id` | 完整正文的版本哈希 |
 | `total_chars` | 完整提取正文的字符数 |
@@ -43,6 +48,8 @@
 | `cached` / `cache_age_seconds` | 是否读取缓存 / 缓存年龄 |
 
 失败页面不保证包含抓取时间、最终 URL 或正文版本。HTTP 成功也不保证正文准确或来源可信，仍需调用方核对。
+
+单页、批量和调研都支持 `content_format="markdown"`，与 `response_format="json"` 可以同时使用。分页偏移和字符预算包含 Markdown 语法；片段可能切在代码围栏、表格或链接中间，应按原顺序拼接后渲染。续读必须保持 `content_format` 不变，并携带原版本。详见 [Markdown 与引用](content.md)。
 
 ## 调研资料包的正文预算
 

@@ -33,6 +33,7 @@ from mcp.server.fastmcp import FastMCP
 from request_policy import RequestPolicy
 from http_policy import HTTPPolicyError
 from batch_budget import BatchBudget, Unfinished
+from page_content import content_warnings, extract_markdown
 from search_results import merge_results, normalize_domains, select_results, url_identity
 
 mcp = FastMCP("resourcer")
@@ -375,15 +376,31 @@ def _slice_page(result: dict, start_index: int, limit: int | None) -> dict:
 
 
 async def _fetch_one(client: httpx.AsyncClient, url: str, max_chars: int,
-                     start_index: int = 0, refresh: bool = False) -> dict:
+                     start_index: int = 0, refresh: bool = False, content_format: str = "text") -> dict:
     if max_chars < 0 or start_index < 0:
         raise ValueError("max_chars 和 start_index 必须是非负整数")
+    if content_format not in {"text", "markdown"}:
+        raise ValueError("content_format 必须是 text 或 markdown")
     try:
         result = await asyncio.wait_for(
             NETWORK.fetch(url, lambda: _fetch_uncached(client, url), refresh=refresh), NETWORK.http.total_timeout)
     except asyncio.TimeoutError:
         result = {"url": url, "ok": False, "error": "抓取总时间预算已用尽（含排队与等待）",
                   "error_code": "deadline", "title": "", "text": ""}
+    markdown = result.pop("_markdown", "")
+    markdown_error = result.pop("_markdown_error", "")
+    if content_format == "markdown":
+        previous_error = result.get("error", "") if not result.get("ok") else ""
+        result.update(text=markdown, ok=bool(markdown), error="" if markdown else markdown_error or previous_error or "无法提取 Markdown 正文")
+    elif result.get("ok") and not result["text"]:
+        result.update(ok=False, error=result.get("error") or "无法提取正文")
+    result["content_format"] = content_format
+    if result["ok"]:
+        prefix = "markdown\0" if content_format == "markdown" else ""
+        result["content_id"] = hashlib.sha256((prefix + result["text"]).encode("utf-8")).hexdigest()
+        result["warnings"] = content_warnings(result["text"], result.get("title", ""))
+        if markdown_error:
+            result["warnings"].append("markdown_unavailable")
     return _slice_page(result, start_index, max_chars or None)
 
 
@@ -393,7 +410,8 @@ def _page_note(result: dict) -> str:
     note = f"\n\n_正文范围 [{result['start_index']}, {result['end_index']}) / 共 {result['total_chars']} 字符。_"
     if result["next_index"] is not None:
         version = f", expected_content_id={json.dumps(result['content_id'])}" if result.get("content_id") else ""
-        note += f"\n继续读取：fetch_page(url={json.dumps(result['url'], ensure_ascii=False)}, start_index={result['next_index']}{version})"
+        formatting = ', content_format="markdown"' if result.get("content_format") == "markdown" else ""
+        note += f"\n继续读取：fetch_page(url={json.dumps(result['url'], ensure_ascii=False)}, start_index={result['next_index']}{version}{formatting})"
     else:
         note += "\n_已到正文末尾。_"
     return note
@@ -426,11 +444,20 @@ async def _fetch_uncached(client: httpx.AsyncClient, url: str) -> dict:
 
     try:
         text = trafilatura.extract(
-            r.text, url=url,
+            r.text, url=str(r.url),
             include_comments=False, include_tables=True, favor_recall=True,
         ) or ""
     except Exception:
-        return {"url": url, "ok": False, "error": "正文解析失败", "title": "", "text": ""}
+        text = ""
+        text_error = "正文解析失败"
+    else:
+        text_error = "" if text else "无法提取正文"
+    try:
+        formatted = extract_markdown(r.text, str(r.url))
+        markdown_error = "" if formatted["markdown"] else "无法提取 Markdown 正文"
+    except Exception:
+        formatted = {"markdown": "", "references": [], "references_truncated": False, "structure": {}}
+        markdown_error = "Markdown 正文解析失败"
     title = ""
     try:
         soup = BeautifulSoup(r.text, "html.parser")
@@ -440,8 +467,11 @@ async def _fetch_uncached(client: httpx.AsyncClient, url: str) -> dict:
         pass
 
     return {
-        "url": url, "ok": bool(text), "error": "" if text else "无法提取正文",
+        "url": url, "ok": bool(text or formatted["markdown"]), "error": text_error,
         "title": title, "text": text,
+        "_markdown": formatted["markdown"], "_markdown_error": markdown_error,
+        "references": formatted["references"], "references_truncated": formatted["references_truncated"],
+        "structure": formatted["structure"], "extractor": "trafilatura", "extractor_version": trafilatura.__version__,
         "final_url": str(r.url),
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "content_id": hashlib.sha256(text.encode("utf-8")).hexdigest(),
@@ -594,6 +624,7 @@ async def fetch_page(
     url: str, max_chars: int = 50000, start_index: int = 0,
     refresh: bool = False, response_format: Literal["text", "json"] = "text",
     expected_content_id: str = "",
+    content_format: Literal["text", "markdown"] = "text",
 ) -> str:
     """提取网页正文，支持分页续读、单次刷新及 JSON 元数据。
 
@@ -604,11 +635,14 @@ async def fetch_page(
         refresh: 跳过已完成缓存；仍复用同 URL 正在进行的抓取
         response_format: text 返回可读文本；json 返回可解析 JSON 字符串
         expected_content_id: 可选的上次正文版本；不匹配时返回错误，防止续读混入更新后的正文
+        content_format: text 提取纯文本，markdown 保留标题、代码、表格及正文链接；续读必须保持格式一致
     """
     if max_chars < 0 or start_index < 0:
         return _tool_error("max_chars 和 start_index 必须是非负整数", response_format)
+    if content_format not in {"text", "markdown"}:
+        return _tool_error("content_format 必须是 text 或 markdown", response_format)
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as c:
-        res = await _fetch_one(c, url, max_chars, start_index, refresh)
+        res = await _fetch_one(c, url, max_chars, start_index, refresh, content_format)
     if res["ok"] and expected_content_id and res.get("content_id") != expected_content_id:
         res = {**res, "ok": False, "text": "", "error": "正文版本已变化，请从 start_index=0 重新读取"}
     if response_format == "json":
@@ -623,7 +657,8 @@ async def fetch_page(
 @mcp.tool()
 async def fetch_pages(urls: list[str], max_chars: int = 30000,
                       refresh: bool = False, response_format: Literal["text", "json"] = "text",
-                      time_budget_seconds: float = 120) -> str:
+                      time_budget_seconds: float = 120,
+                      content_format: Literal["text", "markdown"] = "text") -> str:
     """批量抓取正文；进程内最多 5 路网络抓取，共享限速与短时缓存。
 
     Args:
@@ -632,11 +667,14 @@ async def fetch_pages(urls: list[str], max_chars: int = 30000,
         refresh: 跳过已完成缓存
         response_format: text 或 json；JSON 中每页的 next_index 可传给 fetch_page 续读
         time_budget_seconds: 整批抓取时间预算，含分批排队；默认 120 秒，大于 0 且不超过 600
+        content_format: text 或 markdown；与返回封装的 response_format 相互独立
     """
     if not urls:
         return _tool_error("urls 不能为空", response_format)
     if max_chars < 0:
         return _tool_error("max_chars 必须是非负整数", response_format)
+    if content_format not in {"text", "markdown"}:
+        return _tool_error("content_format 必须是 text 或 markdown", response_format)
 
     try:
         budget = BatchBudget(time_budget_seconds)
@@ -645,9 +683,11 @@ async def fetch_pages(urls: list[str], max_chars: int = 30000,
 
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as c:
         unique_urls = list(dict.fromkeys(urls))
-        unique_results = await budget.collect(unique_urls, lambda u: _fetch_one(c, u, max_chars, refresh=refresh),
+        unique_results = await budget.collect(unique_urls, lambda u: _fetch_one(c, u, max_chars, refresh=refresh, content_format=content_format),
                                              concurrency=FETCH_CONCURRENCY)
     by_url = {url: _batch_page(url, result) for url, result in zip(unique_urls, unique_results)}
+    for page in by_url.values():
+        page["content_format"] = content_format
     results = [dict(by_url[url]) for url in urls]
 
     ok = sum(1 for r in results if r["ok"])
@@ -679,6 +719,7 @@ async def deep_research(
     include_domains: list[str] | None = None,
     exclude_domains: list[str] | None = None,
     time_budget_seconds: float = 120,
+    content_format: Literal["text", "markdown"] = "text",
 ) -> str:
     """搜索并抓取前 N 条正文，返回资料包供调用方总结；不自动写文件。
 
@@ -693,9 +734,12 @@ async def deep_research(
         include_domains: 搜索结果仅保留指定裸域名及其子域名（不限制正文请求的 HTTP 跳转）
         exclude_domains: 搜索结果排除指定裸域名及其子域名
         time_budget_seconds: 搜索与正文抓取共用的整批时间预算，默认 120 秒；大于 0 且不超过 600
+        content_format: text 或 markdown，作用于抓取正文；正文预算按所选格式的字符数计算
     """
     if min(max_chars_each, max_total_chars) < 0:
         return _tool_error("max_chars_each 和 max_total_chars 必须是非负整数", response_format)
+    if content_format not in {"text", "markdown"}:
+        return _tool_error("content_format 必须是 text 或 markdown", response_format)
     try:
         budget = BatchBudget(time_budget_seconds)
         include_domains = normalize_domains(include_domains)
@@ -726,8 +770,10 @@ async def deep_research(
     top_urls = [it["url"] for it in items[:fetch_top_n]]
 
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as c:
-        fetched = await budget.collect(top_urls, lambda u: _fetch_one(c, u, 0), concurrency=FETCH_CONCURRENCY)
+        fetched = await budget.collect(top_urls, lambda u: _fetch_one(c, u, 0, content_format=content_format), concurrency=FETCH_CONCURRENCY)
     fetched = [_batch_page(url, result) for url, result in zip(top_urls, fetched)]
+    for page in fetched:
+        page["content_format"] = content_format
 
     remaining = max_total_chars if max_total_chars else None
     bounded = []

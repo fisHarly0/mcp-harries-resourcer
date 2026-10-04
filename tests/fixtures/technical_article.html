@@ -1,0 +1,19 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Async worker guide</title></head><body>
+<nav><a href="/navigation">Navigation only</a></nav>
+<main><article><h1>Async worker guide</h1>
+<p>This guide explains how to run a small asynchronous worker and keep each result attached to its source. The examples show real indentation and a table of options so readers can compare behaviour without guessing.</p>
+<h2>Run a worker</h2>
+<p>Use <code>asyncio.run(main())</code> to enter the loop. Read the <a href="../api/tasks.html#cancel">task cancellation reference</a> and the <a href="https://example.net/guide?q=a&amp;mode=b">external guide</a> before changing the timeout. Keep the <strong>original indentation</strong> when copying this example.</p>
+<pre><code class="language-python">async def main():
+    for item in ["甲", "乙"]:
+        print(item)
+
+asyncio.run(main())
+</code></pre>
+<h2>Options</h2>
+<p>These options control the operation. A body budget counts returned characters, while a timeout counts elapsed waiting time. Use both controls when reading several remote pages together.</p>
+<table><thead><tr><th>Option</th><th>Meaning</th></tr></thead>
+<tbody><tr><td>timeout</td><td>Maximum waiting time</td></tr><tr><td>limit</td><td>Maximum body length</td></tr></tbody></table>
+<ul><li>Keep the final URL with the note.</li><li>Check the content version before continuing.</li></ul>
+<p>See the <a href="../api/tasks.html#cancel">same reference again</a> for details. Invalid actions such as <a href="javascript:alert(1)">run action</a> are not article sources.</p>
+</article></main><footer><a href="/legal">Footer only</a></footer></body></html>

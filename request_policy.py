@@ -2,8 +2,10 @@
 
 import asyncio
 from collections import OrderedDict
+from copy import deepcopy
 from dataclasses import dataclass
 import logging
+import json
 import os
 import time
 
@@ -75,7 +77,7 @@ class PageCache:
         if entry is None:
             return None
         self.entries.move_to_end(url)
-        return {**entry.result, "cached": True, "cache_age_seconds": int(self.clock() - entry.created_at)}
+        return {**deepcopy(entry.result), "cached": True, "cache_age_seconds": int(self.clock() - entry.created_at)}
 
     def invalidate(self, url):
         if url in self.entries:
@@ -85,14 +87,17 @@ class PageCache:
         if not result.get("ok") or not self.ttl or not self.max_entries or not self.max_bytes:
             return
         self._expire()
-        size = sum(len(str(value).encode("utf-8")) for value in (url, result.get("title", ""), result.get("text", "")))
+        size = sum(len(str(value).encode("utf-8")) for value in (
+            url, result.get("title", ""), result.get("text", ""), result.get("_markdown", "")))
+        if result.get("references"):
+            size += len(json.dumps(result["references"], ensure_ascii=False).encode("utf-8"))
         if size > self.max_bytes:
             return
         if url in self.entries:
             self._drop(url)
         while self.entries and (len(self.entries) >= self.max_entries or self.total_bytes + size > self.max_bytes):
             self._drop(next(iter(self.entries)))
-        self.entries[url] = CacheEntry(dict(result), self.clock(), size)
+        self.entries[url] = CacheEntry(deepcopy(result), self.clock(), size)
         self.total_bytes += size
 
 
@@ -142,7 +147,7 @@ class RequestPolicy:
                 if result is None:
                     # The owner was cancelled. Retry using this caller's live client.
                     continue
-                return dict(result)
+                return deepcopy(result)
 
             flight = asyncio.get_running_loop().create_future()
             self.inflight[url] = flight
@@ -151,7 +156,7 @@ class RequestPolicy:
                     result = {**await loader(), "cached": False, "cache_age_seconds": 0}
                 self.cache.put(url, result)
                 flight.set_result(result)
-                return dict(result)
+                return deepcopy(result)
             except BaseException:
                 # Resolve (rather than cancel) so a cancelled owner cannot cancel followers.
                 flight.set_result(None)

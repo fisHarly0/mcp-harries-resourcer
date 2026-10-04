@@ -157,7 +157,7 @@ class SearchControlTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["queries"][1]["search_status"], "incomplete")
 
     async def test_research_fetches_only_allowed_results(self):
-        async def fetch(client, url, max_chars):
+        async def fetch(client, url, max_chars, **options):
             return {"url": url, "title": "Guide", "text": "Allowed body", "ok": True}
         with patch.object(server, "_ddg", AsyncMock(return_value=[item("https://wrong.org/a"), item("https://docs.python.org/a")])), \
                 patch.object(server, "_fetch_one", side_effect=fetch) as fetched:
